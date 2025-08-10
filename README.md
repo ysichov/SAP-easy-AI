@@ -19,6 +19,10 @@ First try with OpenAi gpt-oss-20b
 <img width="1315" height="254" alt="image" src="https://github.com/user-attachments/assets/6064a0bc-02e5-4525-9679-64de6e0e401e" />
 
 Second example - Google Gemma 3 12b
+<img width="1367" height="458" alt="image" src="https://github.com/user-attachments/assets/da980b2a-5252-46b4-bdcb-7bb21e24a23c" />
+
+Enkoy AI in SAP )
+
 
 
 
