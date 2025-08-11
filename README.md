@@ -2,7 +2,8 @@
 
 **SAP integration example with local gpt-oss-20b in LM Studio**
 
-<img width="500" height="260" alt="image" src="https://github.com/user-attachments/assets/8ac2c493-bf97-40fb-ba8d-934b791607d8" />
+<img width="508" height="260" alt="image" src="https://github.com/user-attachments/assets/351e7867-7898-40cc-bd56-94a299bdb5d7" />
+
 
 
 
