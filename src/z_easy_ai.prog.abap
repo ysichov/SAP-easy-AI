@@ -192,6 +192,6 @@ ENDCLASS.
 
 START-OF-SELECTION.
 
-  DATA(lo_AI) = NEW zcl_ai_api( ).
+  DATA(lo_AI) = NEW lcl_ai_api( ).
 
   lo_ai->call_openai( CONV #( p_prompt ) ).
