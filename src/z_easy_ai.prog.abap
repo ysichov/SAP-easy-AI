@@ -1,36 +1,41 @@
 *&---------------------------------------------------------------------*
 *& Report Z_EASY_AI
 *&---------------------------------------------------------------------*
-*&
+*&Easy and small AI API example
 *&---------------------------------------------------------------------*
 REPORT z_easy_ai.
 
 PARAMETERS: p_prompt(200).
 
-CLASS lCL_AI_API DEFINITION.
+CLASS lcl_ai_api DEFINITION.
+
   PUBLIC SECTION.
 
     METHODS  call_openai  IMPORTING iv_prompt TYPE string .
+
   PRIVATE SECTION.
     DATA: mv_api_key TYPE string.
 
-    METHODS: build_request
-      IMPORTING
-        iv_prompt  TYPE string
-      EXPORTING
-        ev_payload TYPE string ,
+    METHODS:
+      build_request
+        IMPORTING
+          iv_prompt  TYPE string
+        EXPORTING
+          ev_payload TYPE string ,
+
       send_request
         IMPORTING
           iv_payload  TYPE string
         EXPORTING
           ev_response TYPE string,
+
       output
         IMPORTING
           iv_prompt  TYPE string
           iv_content TYPE string .
 ENDCLASS.
 
-CLASS lCL_AI_API IMPLEMENTATION.
+CLASS lcl_ai_api IMPLEMENTATION.
 
   METHOD call_openai.
     DATA: lv_prompt   TYPE string,
@@ -60,10 +65,9 @@ CLASS lCL_AI_API IMPLEMENTATION.
   METHOD build_request.
 
     DATA: lv_payload TYPE string.
-
     lv_payload = |{ '{ "model": "any_name", "messages": [{ "role": "user", "content": "' && iv_prompt &&  '" }], "max_tokens": 1000 } ' }|.
-
     ev_payload = lv_payload.
+
   ENDMETHOD.
 
   METHOD send_request.
@@ -137,6 +141,7 @@ CLASS lCL_AI_API IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD output.
+
     DATA: lv_text(1000) TYPE c,
           lv_string     TYPE string,
           lv_content    TYPE string,
@@ -146,14 +151,17 @@ CLASS lCL_AI_API IMPLEMENTATION.
              role              TYPE string,
              content           TYPE string,
              reasoning_content TYPE string,
-           END           OF lty_s_MESSAGE,
+           END           OF lty_s_message,
+
            lty_t_message TYPE STANDARD TABLE OF lty_s_message WITH NON-UNIQUE DEFAULT KEY,
+
            BEGIN OF lty_s_choice,
              index         TYPE string,
              message       TYPE lty_s_message,
              logprobs      TYPE string,
              finish_reason TYPE string,
            END      OF lty_s_choice,
+
            BEGIN OF lty_s_base_chatgpt_res,
              id      TYPE string,
              object  TYPE string,
@@ -162,11 +170,10 @@ CLASS lCL_AI_API IMPLEMENTATION.
              choices TYPE TABLE OF lty_s_choice WITH NON-UNIQUE DEFAULT KEY,
            END OF lty_s_base_chatgpt_res.
 
-    DATA ls_response TYPE lty_s_base_chatgpt_res.
+    DATA: ls_response TYPE lty_s_base_chatgpt_res,
+          lv_binary   TYPE xstring,
+          lo_x2c      TYPE REF TO cl_abap_conv_in_ce.
 
-    DATA: lv_binary TYPE xstring.
-
-    DATA: lo_x2c TYPE REF TO cl_abap_conv_in_ce.
     lo_x2c = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
     lv_binary = iv_content.
     lo_x2c->convert( EXPORTING input = lv_binary
@@ -174,24 +181,23 @@ CLASS lCL_AI_API IMPLEMENTATION.
 
     /ui2/cl_json=>deserialize( EXPORTING json = lv_string CHANGING data = ls_response ).
 
-
     IF  ls_response-choices IS NOT INITIAL.
       lv_content = ls_response-choices[ 1 ]-message-content.
       lv_reasoning = ls_response-choices[ 1 ]-message-reasoning_content.
     ELSE.
       lv_content = lv_string.
+      cl_abap_browser=>show_html(  html_string = lv_content title = 'Error (' ).
+      RETURN.
     ENDIF.
 
     cl_demo_output=>display(
      | PROMPT: { iv_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { lv_content } { cl_abap_char_utilities=>cr_lf } reasoning: { lv_reasoning } | ).
-  ENDMETHOD.
 
+  ENDMETHOD.
 
 ENDCLASS.
 
 
 START-OF-SELECTION.
 
-  DATA(lo_AI) = NEW lcl_ai_api( ).
-
-  lo_ai->call_openai( CONV #( p_prompt ) ).
+  NEW lcl_ai_api( )->call_openai( CONV #( p_prompt ) )..
