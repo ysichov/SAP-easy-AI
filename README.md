@@ -35,6 +35,10 @@ Second example - **Google Gemma 3 12b**
 
 Enkoy AI in SAP )
 
+Update 1. Selection screen can be used for AI config
+<img width="825" height="218" alt="image" src="https://github.com/user-attachments/assets/95b16fa6-ceb5-4d01-9c80-87a071102aa7" />
+
+
 
 
 
