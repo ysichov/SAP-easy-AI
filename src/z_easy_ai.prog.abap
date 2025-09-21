@@ -5,7 +5,10 @@
 *&---------------------------------------------------------------------*
 REPORT z_easy_ai.
 
-PARAMETERS: p_prompt(200).
+PARAMETERS: p_prompt(200),
+            p_dest        TYPE text255 MEMORY ID dest,
+            p_model       TYPE text255 MEMORY ID model,
+            p_apikey      TYPE text255  MEMORY ID api.
 
 CLASS lcl_ai_api DEFINITION.
 
@@ -27,7 +30,8 @@ CLASS lcl_ai_api DEFINITION.
         IMPORTING
           iv_payload  TYPE string
         EXPORTING
-          ev_response TYPE string,
+          ev_response TYPE string
+          ev_error    TYPE xfeld,
 
       output
         IMPORTING
@@ -53,19 +57,29 @@ CLASS lcl_ai_api IMPLEMENTATION.
       EXPORTING
         iv_payload  = lv_payload
       IMPORTING
-        ev_response = lv_response.
+        ev_response = lv_response
+        ev_error    = DATA(lv_error).
 
-    CALL METHOD me->output
-      EXPORTING
-        iv_prompt  = iv_prompt
-        iv_content = lv_response.
+    IF lv_error IS NOT INITIAL.
+      cl_demo_output=>display(
+     | PROMPT: { iv_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { lv_response } { cl_abap_char_utilities=>cr_lf } | ).
+
+    ELSE.
+      CALL METHOD me->output
+        EXPORTING
+          iv_prompt  = iv_prompt
+          iv_content = lv_response.
+
+    ENDIF.
+
+
 
   ENDMETHOD.
 
   METHOD build_request.
 
     DATA: lv_payload TYPE string.
-    lv_payload = |{ '{ "model": "any_name", "messages": [{ "role": "user", "content": "' && iv_prompt &&  '" }], "max_tokens": 1000 } ' }|.
+    lv_payload = |{ '{ "model": "' && p_model && '", "messages": [{ "role": "user", "content": "' && iv_prompt &&  '" }], "max_tokens": 1000 } ' }|.
     ev_payload = lv_payload.
 
   ENDMETHOD.
@@ -78,7 +92,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING
-        destination                = 'Z_LM'
+        destination                = p_dest
       IMPORTING
         client                     = lo_http_client
       EXCEPTIONS
@@ -95,11 +109,19 @@ CLASS lcl_ai_api IMPLEMENTATION.
         oa2c_invalid_grant         = 11
         oa2c_secstore_adm          = 12
         OTHERS                     = 13.
-    IF sy-subrc <> 0.
-*     Implement suitable error handling here
+
+    IF sy-subrc = 2.
+      ev_response = 'Destination not found. Please check it in SM59 transaction'.
+      ev_error = abap_true.
+      RETURN.
+    ELSEIF sy-subrc <> 0.
+      ev_response = |cl_http_client=>create_by_destination error №' { sy-subrc }|.
+      ev_error = abap_true.
+      RETURN.
     ENDIF.
 
-    mv_api_key = 'lmstudio'. "any name for local LLMs
+
+    mv_api_key = p_apikey.. "any name for local LLMs
     "set request header
     lo_http_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
     lo_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { mv_api_key }| ).
