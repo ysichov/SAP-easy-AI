@@ -24,7 +24,7 @@ CLASS lcl_ai_api DEFINITION.
         IMPORTING
           iv_prompt  TYPE string
         EXPORTING
-          ev_payload TYPE string ,
+          ev_payload TYPE string,
 
       send_request
         IMPORTING
@@ -36,7 +36,7 @@ CLASS lcl_ai_api DEFINITION.
       output
         IMPORTING
           iv_prompt  TYPE string
-          iv_content TYPE string .
+          iv_content TYPE string.
 ENDCLASS.
 
 CLASS lcl_ai_api IMPLEMENTATION.
@@ -72,8 +72,6 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     ENDIF.
 
-
-
   ENDMETHOD.
 
   METHOD build_request.
@@ -92,23 +90,16 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING
-        destination                = p_dest
+        destination              = p_dest
       IMPORTING
-        client                     = lo_http_client
+        client                   = lo_http_client
       EXCEPTIONS
-        argument_not_found         = 1
-        destination_not_found      = 2
-        destination_no_authority   = 3
-        plugin_not_active          = 4
-        internal_error             = 5
-        oa2c_set_token_error       = 6
-        oa2c_missing_authorization = 7
-        oa2c_invalid_config        = 8
-        oa2c_invalid_parameters    = 9
-        oa2c_invalid_scope         = 10
-        oa2c_invalid_grant         = 11
-        oa2c_secstore_adm          = 12
-        OTHERS                     = 13.
+        argument_not_found       = 1
+        destination_not_found    = 2
+        destination_no_authority = 3
+        plugin_not_active        = 4
+        internal_error           = 5
+        OTHERS                   = 13.
 
     IF sy-subrc = 2.
       ev_response = 'Destination not found. Please check it in SM59 transaction'.
@@ -119,7 +110,6 @@ CLASS lcl_ai_api IMPLEMENTATION.
       ev_error = abap_true.
       RETURN.
     ENDIF.
-
 
     mv_api_key = p_apikey.. "any name for local LLMs
     "set request header
@@ -138,6 +128,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
         http_processing_failed     = 3
         http_invalid_timeout       = 4
         OTHERS                     = 5.
+
     IF sy-subrc = 0.
       CALL METHOD lo_http_client->receive
         EXCEPTIONS
@@ -219,7 +210,5 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
 ENDCLASS.
 
-
 START-OF-SELECTION.
-
   NEW lcl_ai_api( )->call_openai( CONV #( p_prompt ) )..
