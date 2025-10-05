@@ -14,61 +14,61 @@ CLASS lcl_ai_api DEFINITION.
 
   PUBLIC SECTION.
 
-    METHODS  call_openai  IMPORTING iv_prompt TYPE string .
+    METHODS  call_openai  IMPORTING i_prompt TYPE string .
 
   PRIVATE SECTION.
-    DATA: mv_api_key TYPE string.
+    DATA: m_api_key TYPE string.
 
     METHODS:
       build_request
         IMPORTING
-          iv_prompt  TYPE string
+          i_prompt  TYPE string
         EXPORTING
-          ev_payload TYPE string,
+          e_payload TYPE string,
 
       send_request
         IMPORTING
-          iv_payload  TYPE string
+          i_payload  TYPE string
         EXPORTING
-          ev_response TYPE string
-          ev_error    TYPE xfeld,
+          e_response TYPE string
+          e_error    TYPE xfeld,
 
       output
         IMPORTING
-          iv_prompt  TYPE string
-          iv_content TYPE string.
+          i_prompt  TYPE string
+          i_content TYPE string.
 ENDCLASS.
 
 CLASS lcl_ai_api IMPLEMENTATION.
 
   METHOD call_openai.
-    DATA: lv_prompt   TYPE string,
-          lv_payload  TYPE string,
-          lv_response TYPE string.
+    DATA: prompt   TYPE string,
+          payload  TYPE string,
+          response TYPE string.
 
     "Build payload
     CALL METHOD build_request
       EXPORTING
-        iv_prompt  = iv_prompt
+        i_prompt  = i_prompt
       IMPORTING
-        ev_payload = lv_payload.
+        e_payload = payload.
 
     CALL METHOD me->send_request
       EXPORTING
-        iv_payload  = lv_payload
+        i_payload  = payload
       IMPORTING
-        ev_response = lv_response
-        ev_error    = DATA(lv_error).
+        e_response = response
+        e_error    = DATA(error).
 
-    IF lv_error IS NOT INITIAL.
+    IF error IS NOT INITIAL.
       cl_demo_output=>display(
-     | PROMPT: { iv_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { lv_response } { cl_abap_char_utilities=>cr_lf } | ).
+     | PROMPT: { i_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { response } { cl_abap_char_utilities=>cr_lf } | ).
 
     ELSE.
       CALL METHOD me->output
         EXPORTING
-          iv_prompt  = iv_prompt
-          iv_content = lv_response.
+          i_prompt  = i_prompt
+          i_content = response.
 
     ENDIF.
 
@@ -76,23 +76,22 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
   METHOD build_request.
 
-    DATA: lv_payload TYPE string.
-    lv_payload = |{ '{ "model": "' && p_model && '", "messages": [{ "role": "user", "content": "' && iv_prompt &&  '" }], "max_tokens": 1000 } ' }|.
-    ev_payload = lv_payload.
+    DATA: payload TYPE string.
+    payload = |{ '{ "model": "' && p_model && '", "messages": [{ "role": "user", "content": "' && i_prompt &&  '" }], "max_tokens": 1000 } ' }|.
+    e_payload = payload.
 
   ENDMETHOD.
 
   METHOD send_request.
 
-    DATA: lo_http_client   TYPE REF TO if_http_client,
-          lv_response_body TYPE string,
-          lv_header        TYPE string.
+    DATA: response_body TYPE string,
+          header        TYPE string.
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING
         destination              = p_dest
       IMPORTING
-        client                   = lo_http_client
+        client                   = data(o_http_client)
       EXCEPTIONS
         argument_not_found       = 1
         destination_not_found    = 2
@@ -102,26 +101,26 @@ CLASS lcl_ai_api IMPLEMENTATION.
         OTHERS                   = 13.
 
     IF sy-subrc = 2.
-      ev_response = 'Destination not found. Please check it in SM59 transaction'.
-      ev_error = abap_true.
+      e_response = 'Destination not found. Please check it in SM59 transaction'.
+      e_error = abap_true.
       RETURN.
     ELSEIF sy-subrc <> 0.
-      ev_response = |cl_http_client=>create_by_destination error №' { sy-subrc }|.
-      ev_error = abap_true.
+      e_response = |cl_http_client=>create_by_destination error №' { sy-subrc }|.
+      e_error = abap_true.
       RETURN.
     ENDIF.
 
-    mv_api_key = p_apikey.. "any name for local LLMs
+    m_api_key = p_apikey. "any name for local LLMs
     "set request header
-    lo_http_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
-    lo_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { mv_api_key }| ).
+    o_http_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
+    o_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { m_api_key }| ).
 
-    lo_http_client->request->set_method('POST').
+    o_http_client->request->set_method('POST').
 
     "set payload
-    lo_http_client->request->set_cdata( iv_payload ).
+    o_http_client->request->set_cdata( i_payload ).
 
-    CALL METHOD lo_http_client->send
+    CALL METHOD o_http_client->send
       EXCEPTIONS
         http_communication_failure = 1
         http_invalid_state         = 2
@@ -130,7 +129,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
         OTHERS                     = 5.
 
     IF sy-subrc = 0.
-      CALL METHOD lo_http_client->receive
+      CALL METHOD o_http_client->receive
         EXCEPTIONS
           http_communication_failure = 1
           http_invalid_state         = 2
@@ -138,14 +137,14 @@ CLASS lcl_ai_api IMPLEMENTATION.
           OTHERS                     = 4.
       "Get response
       IF sy-subrc <> 0.
-        lv_response_body = lo_http_client->response->get_data( ).
-        ev_response = lv_response_body.
+        response_body = o_http_client->response->get_data( ).
+        e_response = response_body.
       ELSE.
-        lv_response_body = lo_http_client->response->get_data( ).
-        IF lv_response_body IS NOT INITIAL.
-          ev_response = lv_response_body.
+        response_body = o_http_client->response->get_data( ).
+        IF response_body IS NOT INITIAL.
+          e_response = response_body.
         ELSE.
-          ev_response = 'Call was succeesful, but got no response'.
+          e_response = 'Call was succeesful, but got no response'.
         ENDIF.
       ENDIF.
 
@@ -155,60 +154,61 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
   METHOD output.
 
-    DATA: lv_text(1000) TYPE c,
-          lv_string     TYPE string,
-          lv_content    TYPE string,
-          lv_reasoning  TYPE string.
+    DATA: text(1000) TYPE c,
+          str        TYPE string,
+          content    TYPE string,
+          reasoning  TYPE string.
 
-    TYPES: BEGIN OF lty_s_message,
+    TYPES: BEGIN OF t_message,
              role              TYPE string,
              content           TYPE string,
              reasoning_content TYPE string,
-           END           OF lty_s_message,
+           END           OF t_message,
 
-           lty_t_message TYPE STANDARD TABLE OF lty_s_message WITH NON-UNIQUE DEFAULT KEY,
+           t_t_message TYPE STANDARD TABLE OF t_message WITH NON-UNIQUE DEFAULT KEY,
 
-           BEGIN OF lty_s_choice,
+           BEGIN OF t_choice,
              index         TYPE string,
-             message       TYPE lty_s_message,
+             message       TYPE t_message,
              logprobs      TYPE string,
              finish_reason TYPE string,
-           END      OF lty_s_choice,
+           END      OF t_choice,
 
-           BEGIN OF lty_s_base_chatgpt_res,
+           BEGIN OF t_base_openai_res,
              id      TYPE string,
              object  TYPE string,
              created TYPE string,
              model   TYPE string,
-             choices TYPE TABLE OF lty_s_choice WITH NON-UNIQUE DEFAULT KEY,
-           END OF lty_s_base_chatgpt_res.
+             choices TYPE TABLE OF t_choice WITH NON-UNIQUE DEFAULT KEY,
+           END OF t_base_openai_res.
 
-    DATA: ls_response TYPE lty_s_base_chatgpt_res,
-          lv_binary   TYPE xstring,
-          lo_x2c      TYPE REF TO cl_abap_conv_in_ce.
+    DATA: response TYPE t_base_openai_res,
+          binary      TYPE xstring,
+          o_x2c       TYPE REF TO cl_abap_conv_in_ce.
 
-    lo_x2c = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
-    lv_binary = iv_content.
-    lo_x2c->convert( EXPORTING input = lv_binary
-                     IMPORTING data  = lv_string ).
+    o_x2c = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
+    binary = i_content.
+    o_x2c->convert( EXPORTING input = binary
+                     IMPORTING data  = str ).
 
-    /ui2/cl_json=>deserialize( EXPORTING json = lv_string CHANGING data = ls_response ).
+    /ui2/cl_json=>deserialize( EXPORTING json = str CHANGING data = response ).
 
-    IF  ls_response-choices IS NOT INITIAL.
-      lv_content = ls_response-choices[ 1 ]-message-content.
-      lv_reasoning = ls_response-choices[ 1 ]-message-reasoning_content.
+    IF  response-choices IS NOT INITIAL.
+      content = response-choices[ 1 ]-message-content.
+      reasoning = response-choices[ 1 ]-message-reasoning_content.
     ELSE.
-      lv_content = lv_string.
-      cl_abap_browser=>show_html(  html_string = lv_content title = 'Error (' ).
+      content = str.
+      cl_abap_browser=>show_html(  html_string = content title = 'Error (' ).
       RETURN.
     ENDIF.
 
     cl_demo_output=>display(
-     | PROMPT: { iv_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { lv_content } { cl_abap_char_utilities=>cr_lf } reasoning: { lv_reasoning } | ).
+     | PROMPT: { i_prompt } { cl_abap_char_utilities=>cr_lf  } CONTENT: { content } { cl_abap_char_utilities=>cr_lf } reasoning: { reasoning } | ).
 
   ENDMETHOD.
 
 ENDCLASS.
 
 START-OF-SELECTION.
-  NEW lcl_ai_api( )->call_openai( CONV #( p_prompt ) )..
+
+  NEW lcl_ai_api( )->call_openai( CONV #( p_prompt ) ).
