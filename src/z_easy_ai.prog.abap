@@ -14,7 +14,13 @@ CLASS lcl_ai_api DEFINITION.
 
   PUBLIC SECTION.
 
-    METHODS  call_openai  IMPORTING i_prompt TYPE string .
+    DATA: mv_prompt TYPE string,
+          mv_dest   TYPE text255,
+          mv_model  TYPE text255,
+          mv_apikey TYPE text255.
+
+    METHODS:  constructor IMPORTING i_prompt TYPE text255 i_dest TYPE text255 i_model TYPE text255 i_apikey TYPE text255,
+      call_openai  IMPORTING i_prompt TYPE string .
 
   PRIVATE SECTION.
     DATA: m_api_key TYPE string.
@@ -40,6 +46,16 @@ CLASS lcl_ai_api DEFINITION.
 ENDCLASS.
 
 CLASS lcl_ai_api IMPLEMENTATION.
+
+  METHOD constructor.
+    mv_prompt = i_prompt.
+    mv_dest = i_dest.
+    mv_model = i_model.
+    mv_apikey = i_apikey.
+
+    call_openai( mv_prompt ).
+
+  ENDMETHOD.
 
   METHOD call_openai.
     DATA: prompt   TYPE string,
@@ -77,7 +93,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
   METHOD build_request.
 
     DATA: payload TYPE string.
-    payload = |{ '{ "model": "' && p_model && '", "messages": [{ "role": "user", "content": "' && i_prompt &&  '" }], "max_tokens": 1000 } ' }|.
+    payload = |{ '{ "model": "' && mv_model && '", "messages": [{ "role": "user", "content": "' && i_prompt &&  '" }], "max_tokens": 1000 } ' }|.
     e_payload = payload.
 
   ENDMETHOD.
@@ -89,9 +105,9 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING
-        destination              = p_dest
+        destination              = mv_dest
       IMPORTING
-        client                   = data(o_http_client)
+        client                   = DATA(o_http_client)
       EXCEPTIONS
         argument_not_found       = 1
         destination_not_found    = 2
@@ -110,7 +126,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    m_api_key = p_apikey. "any name for local LLMs
+    m_api_key = mv_apikey. "any name for local LLMs
     "set request header
     o_http_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
     o_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { m_api_key }| ).
@@ -183,8 +199,8 @@ CLASS lcl_ai_api IMPLEMENTATION.
            END OF t_base_openai_res.
 
     DATA: response TYPE t_base_openai_res,
-          binary      TYPE xstring,
-          o_x2c       TYPE REF TO cl_abap_conv_in_ce.
+          binary   TYPE xstring,
+          o_x2c    TYPE REF TO cl_abap_conv_in_ce.
 
     o_x2c = cl_abap_conv_in_ce=>create( encoding = 'UTF-8' ).
     binary = i_content.
@@ -210,5 +226,4 @@ CLASS lcl_ai_api IMPLEMENTATION.
 ENDCLASS.
 
 START-OF-SELECTION.
-
-  NEW lcl_ai_api( )->call_openai( CONV #( p_prompt ) ).
+  DATA(lo_ai) = NEW lcl_ai_api(  i_prompt = conv #( p_prompt ) i_dest = p_dest i_model = p_model i_apikey = p_apikey ).
