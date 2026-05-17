@@ -1,5 +1,8 @@
 # SAP-easy-AI
 
+
+This example is only in old version before 17.05.2026. Now it is Claude API usage concept!!!
+
 **SAP integration example with local gpt-oss-20b in LM Studio**
 
 <img width="508" height="260" alt="image" src="https://github.com/user-attachments/assets/351e7867-7898-40cc-bd56-94a299bdb5d7" />
