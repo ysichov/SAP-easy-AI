@@ -83,7 +83,10 @@ CLASS lcl_ai_api IMPLEMENTATION.
     lv_prompt = i_prompt.
     REPLACE ALL OCCURRENCES OF '\' IN lv_prompt WITH '\\'.
     REPLACE ALL OCCURRENCES OF '"' IN lv_prompt WITH '\"'.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_prompt WITH '\n'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_prompt WITH '\n'.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN lv_prompt WITH '\f'.
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
 
     rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ '}' }|.
   ENDMETHOD.
