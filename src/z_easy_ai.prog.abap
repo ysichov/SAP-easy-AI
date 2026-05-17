@@ -129,7 +129,16 @@ CLASS lcl_ai_api IMPLEMENTATION.
     m_api_key = mv_apikey. "any name for local LLMs
     "set request header
     o_http_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
-    o_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { m_api_key }| ).
+
+    " Обязательный заголовок версии (пишем строго маленькими буквами)
+    o_http_client->request->set_header_field(
+      name  = 'anthropic-version'
+      value = '2023-06-01' " Это стандартная фиксированная дата версии API Anthropic
+    ).
+    "o_http_client->request->set_header_field( name = 'Authorization' value = |Bearer { m_api_key }| ).
+    o_http_client->request->set_header_field(
+      name  = 'x-api-key'
+      value = m_api_key ).
 
     o_http_client->request->set_method('POST').
 
@@ -226,4 +235,4 @@ CLASS lcl_ai_api IMPLEMENTATION.
 ENDCLASS.
 
 START-OF-SELECTION.
-  DATA(lo_ai) = NEW lcl_ai_api(  i_prompt = conv #( p_prompt ) i_dest = p_dest i_model = p_model i_apikey = p_apikey ).
+  DATA(lo_ai) = NEW lcl_ai_api(  i_prompt = CONV #( p_prompt ) i_dest = p_dest i_model = p_model i_apikey = p_apikey ).
