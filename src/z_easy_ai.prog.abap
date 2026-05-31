@@ -113,15 +113,18 @@ CLASS lcl_ai_api IMPLEMENTATION.
   METHOD build_payload.
     DATA: lv_prompt           TYPE string,
           lv_prompt_cache_key TYPE string,
-          lv_provider         TYPE string.
+          lv_provider         TYPE string,
+          lv_cr               TYPE c LENGTH 1.
 
     lv_provider = i_provider.
     TRANSLATE lv_provider TO UPPER CASE.
+    lv_cr = cl_abap_char_utilities=>cr_lf(1).
 
     lv_prompt = i_prompt.
     REPLACE ALL OCCURRENCES OF '\' IN lv_prompt WITH '\\'.
     REPLACE ALL OCCURRENCES OF '"' IN lv_prompt WITH '\"'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN lv_prompt WITH '\n'.
+    REPLACE ALL OCCURRENCES OF lv_cr IN lv_prompt WITH '\r'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>newline IN lv_prompt WITH '\n'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN lv_prompt WITH '\f'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
