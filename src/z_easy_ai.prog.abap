@@ -121,7 +121,16 @@ CLASS lcl_ai_api IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD parse_response.
-    TYPES: BEGIN OF t_content_block,
+    TYPES: BEGIN OF t_prompt_tokens_details,
+             cached_tokens TYPE string,
+           END OF t_prompt_tokens_details,
+           BEGIN OF t_usage,
+             prompt_tokens         TYPE string,
+             completion_tokens     TYPE string,
+             total_tokens          TYPE string,
+             prompt_tokens_details TYPE t_prompt_tokens_details,
+           END OF t_usage,
+           BEGIN OF t_content_block,
              type TYPE string,
              text TYPE string,
            END OF t_content_block,
@@ -133,6 +142,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
              model       TYPE string,
              stop_reason TYPE string,
              content     TYPE t_content_blocks,
+             usage       TYPE t_usage,
            END OF t_anthropic_res.
 
     TYPES: BEGIN OF t_openai_message,
@@ -152,11 +162,14 @@ CLASS lcl_ai_api IMPLEMENTATION.
              created TYPE string,
              model   TYPE string,
              choices TYPE t_openai_choices,
+             usage   TYPE t_usage,
            END OF t_openai_res.
 
     DATA: lv_provider     TYPE string,
           response        TYPE t_anthropic_res,
-          openai_response TYPE t_openai_res.
+          openai_response TYPE t_openai_res,
+          lv_text         TYPE string,
+          lv_usage_info   TYPE string.
 
     lv_provider = i_provider.
     TRANSLATE lv_provider TO UPPER CASE.
@@ -164,7 +177,13 @@ CLASS lcl_ai_api IMPLEMENTATION.
     IF lv_provider = 'OPENAI'.
       /ui2/cl_json=>deserialize( EXPORTING json = i_json CHANGING data = openai_response ).
       IF openai_response-choices IS NOT INITIAL.
-        rv_answer = openai_response-choices[ 1 ]-message-content.
+        lv_text = openai_response-choices[ 1 ]-message-content.
+        IF openai_response-usage-total_tokens IS NOT INITIAL.
+          lv_usage_info = |Tokens: prompt={ openai_response-usage-prompt_tokens } completion={ openai_response-usage-completion_tokens } total={ openai_response-usage-total_tokens } cached={ openai_response-usage-prompt_tokens_details-cached_tokens }|.
+          rv_answer = lv_text && cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline && lv_usage_info.
+        ELSE.
+          rv_answer = lv_text.
+        ENDIF.
       ELSE.
         rv_answer = i_json.
       ENDIF.
@@ -174,7 +193,13 @@ CLASS lcl_ai_api IMPLEMENTATION.
     /ui2/cl_json=>deserialize( EXPORTING json = i_json CHANGING data = response ).
 
     IF response-content IS NOT INITIAL.
-      rv_answer = response-content[ 1 ]-text.
+      lv_text = response-content[ 1 ]-text.
+      IF response-usage-total_tokens IS NOT INITIAL.
+        lv_usage_info = |Tokens: input={ response-usage-prompt_tokens } output={ response-usage-completion_tokens } total={ response-usage-total_tokens }|.
+        rv_answer = lv_text && cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline && lv_usage_info.
+      ELSE.
+        rv_answer = lv_text.
+      ENDIF.
     ELSE.
       rv_answer = i_json.
     ENDIF.
