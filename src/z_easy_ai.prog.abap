@@ -415,8 +415,18 @@ CLASS lcl_popup IMPLEMENTATION.
       APPEND lv_answer TO lt_raw.
     ENDIF.
     LOOP AT lt_raw INTO DATA(lv_raw_line).
-      ls_answer = lv_raw_line.
-      APPEND ls_answer TO lt_answer.
+      IF strlen( lv_raw_line ) = 0.
+        CLEAR ls_answer.
+        APPEND ls_answer TO lt_answer.
+      ELSE.
+        WHILE strlen( lv_raw_line ) > 255.
+          ls_answer = lv_raw_line(255).
+          APPEND ls_answer TO lt_answer.
+          lv_raw_line = substring( val = lv_raw_line off = 255 ).
+        ENDWHILE.
+        ls_answer = lv_raw_line.
+        APPEND ls_answer TO lt_answer.
+      ENDIF.
     ENDLOOP.
 
     mo_answer->set_text_as_stream( text = lt_answer ).
