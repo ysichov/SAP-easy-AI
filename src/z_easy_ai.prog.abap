@@ -5,9 +5,14 @@
 *&---------------------------------------------------------------------*
 REPORT z_easy_ai.
 
+SELECTION-SCREEN BEGIN OF BLOCK b_api WITH FRAME TITLE TEXT-001.
+PARAMETERS: p_anth RADIOBUTTON GROUP api DEFAULT 'X',
+            p_oai  RADIOBUTTON GROUP api.
+
 PARAMETERS: p_dest   TYPE text255 MEMORY ID dest,
             p_model  TYPE text255 MEMORY ID model,
             p_apikey TYPE text255 MEMORY ID api.
+SELECTION-SCREEN END OF BLOCK b_api.
 
 *----------------------------------------------------------------------*
 * lcl_ai_api - HTTP communication with Anthropic API
@@ -19,6 +24,7 @@ CLASS lcl_ai_api DEFINITION.
                 i_dest           TYPE text255
                 i_model          TYPE text255
                 i_apikey         TYPE string
+                i_provider       TYPE string DEFAULT 'ANTHROPIC'
       RETURNING VALUE(rv_answer) TYPE string.
 
   PRIVATE SECTION.
@@ -30,6 +36,7 @@ CLASS lcl_ai_api DEFINITION.
 
       parse_response
         IMPORTING i_json           TYPE string
+                  i_provider       TYPE string
         RETURNING VALUE(rv_answer) TYPE string.
 ENDCLASS.
 
@@ -38,6 +45,14 @@ CLASS lcl_ai_api IMPLEMENTATION.
   METHOD ask.
     DATA: payload  TYPE string,
           o_client TYPE REF TO if_http_client.
+    DATA: lv_provider TYPE string,
+          lv_auth     TYPE string.
+
+    lv_provider = i_provider.
+    TRANSLATE lv_provider TO UPPER CASE.
+    IF lv_provider IS INITIAL.
+      lv_provider = 'ANTHROPIC'.
+    ENDIF.
 
     payload = build_payload( i_prompt = i_prompt i_model = i_model ).
 
@@ -55,9 +70,18 @@ CLASS lcl_ai_api IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    o_client->request->set_header_field( name = 'Content-Type'     value = 'application/json' ).
-    o_client->request->set_header_field( name = 'anthropic-version' value = '2023-06-01' ).
-    o_client->request->set_header_field( name = 'x-api-key'         value = i_apikey ).
+    o_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
+    IF lv_provider = 'OPENAI'.
+      lv_auth = i_apikey.
+      IF lv_auth CP 'Bearer *' OR lv_auth CP 'bearer *'.
+        o_client->request->set_header_field( name = 'Authorization' value = lv_auth ).
+      ELSE.
+        o_client->request->set_header_field( name = 'Authorization' value = |Bearer { lv_auth }| ).
+      ENDIF.
+    ELSE.
+      o_client->request->set_header_field( name = 'anthropic-version' value = '2023-06-01' ).
+      o_client->request->set_header_field( name = 'x-api-key'         value = i_apikey ).
+    ENDIF.
     o_client->request->set_method( 'POST' ).
     o_client->request->set_cdata( payload ).
 
@@ -75,7 +99,7 @@ CLASS lcl_ai_api IMPLEMENTATION.
                  OTHERS                     = 4 ).
 
     DATA(lv_response) = o_client->response->get_cdata( ).
-    rv_answer = parse_response( lv_response ).
+    rv_answer = parse_response( i_json = lv_response i_provider = lv_provider ).
   ENDMETHOD.
 
   METHOD build_payload.
@@ -106,7 +130,42 @@ CLASS lcl_ai_api IMPLEMENTATION.
              content     TYPE t_content_blocks,
            END OF t_anthropic_res.
 
-    DATA response TYPE t_anthropic_res.
+    TYPES: BEGIN OF t_openai_message,
+             role              TYPE string,
+             content           TYPE string,
+             reasoning_content TYPE string,
+           END OF t_openai_message,
+           BEGIN OF t_openai_choice,
+             index         TYPE string,
+             message       TYPE t_openai_message,
+             finish_reason TYPE string,
+           END OF t_openai_choice,
+           t_openai_choices TYPE STANDARD TABLE OF t_openai_choice WITH NON-UNIQUE DEFAULT KEY,
+           BEGIN OF t_openai_res,
+             id      TYPE string,
+             object  TYPE string,
+             created TYPE string,
+             model   TYPE string,
+             choices TYPE t_openai_choices,
+           END OF t_openai_res.
+
+    DATA: lv_provider     TYPE string,
+          response        TYPE t_anthropic_res,
+          openai_response TYPE t_openai_res.
+
+    lv_provider = i_provider.
+    TRANSLATE lv_provider TO UPPER CASE.
+
+    IF lv_provider = 'OPENAI'.
+      /ui2/cl_json=>deserialize( EXPORTING json = i_json CHANGING data = openai_response ).
+      IF openai_response-choices IS NOT INITIAL.
+        rv_answer = openai_response-choices[ 1 ]-message-content.
+      ELSE.
+        rv_answer = i_json.
+      ENDIF.
+      RETURN.
+    ENDIF.
+
     /ui2/cl_json=>deserialize( EXPORTING json = i_json CHANGING data = response ).
 
     IF response-content IS NOT INITIAL.
@@ -126,7 +185,8 @@ CLASS lcl_popup DEFINITION.
     METHODS constructor
       IMPORTING i_dest   TYPE text255
                 i_model  TYPE text255
-                i_apikey TYPE string.
+                i_apikey TYPE string
+                i_provider TYPE string.
 
     METHODS show.
 
@@ -134,6 +194,7 @@ CLASS lcl_popup DEFINITION.
     DATA: mv_dest     TYPE text255,
           mv_model    TYPE text255,
           mv_apikey   TYPE string,
+          mv_provider TYPE string,
           mo_dialog   TYPE REF TO cl_gui_dialogbox_container,
           mo_toolbar  TYPE REF TO cl_gui_toolbar,
           mo_split    TYPE REF TO cl_gui_splitter_container,
@@ -153,9 +214,10 @@ ENDCLASS.
 CLASS lcl_popup IMPLEMENTATION.
 
   METHOD constructor.
-    mv_dest   = i_dest.
-    mv_model  = i_model.
-    mv_apikey = i_apikey.
+    mv_dest     = i_dest.
+    mv_model    = i_model.
+    mv_apikey   = i_apikey.
+    mv_provider = i_provider.
   ENDMETHOD.
 
   METHOD show.
@@ -288,7 +350,8 @@ CLASS lcl_popup IMPLEMENTATION.
       i_prompt  = lv_prompt
       i_dest    = mv_dest
       i_model   = mv_model
-      i_apikey  = mv_apikey ).
+      i_apikey  = mv_apikey
+      i_provider = mv_provider ).
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
@@ -335,7 +398,8 @@ AT SELECTION-SCREEN.
   DATA(lo_popup) = NEW lcl_popup(
     i_dest   = p_dest
     i_model  = p_model
-    i_apikey = CONV string( p_apikey ) ).
+    i_apikey = CONV string( p_apikey )
+    i_provider = COND string( WHEN p_oai = 'X' THEN 'OPENAI' ELSE 'ANTHROPIC' ) ).
 
   lo_popup->show( ).
 
