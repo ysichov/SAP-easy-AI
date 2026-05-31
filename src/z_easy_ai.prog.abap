@@ -14,10 +14,6 @@ PARAMETERS: p_dest   TYPE text255 MEMORY ID dest,
             p_apikey TYPE text255 MEMORY ID api.
 SELECTION-SCREEN END OF BLOCK b_api.
 
-*----------------------------------------------------------------------*
-* Global variables
-*----------------------------------------------------------------------*
-DATA go_popup TYPE REF TO lcl_popup.
 
 *----------------------------------------------------------------------*
 * lcl_ai_api - HTTP communication with Anthropic API
@@ -408,6 +404,11 @@ CLASS lcl_popup IMPLEMENTATION.
   ENDMETHOD.
 
 ENDCLASS.
+
+*----------------------------------------------------------------------*
+* Global variables
+*----------------------------------------------------------------------*
+DATA go_popup TYPE REF TO lcl_popup.
 
 *----------------------------------------------------------------------*
 * INITIALIZATION - suppress F8 (ONLI) button
