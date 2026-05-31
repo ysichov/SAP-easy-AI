@@ -15,6 +15,11 @@ PARAMETERS: p_dest   TYPE text255 MEMORY ID dest,
 SELECTION-SCREEN END OF BLOCK b_api.
 
 *----------------------------------------------------------------------*
+* Global variables
+*----------------------------------------------------------------------*
+DATA go_popup TYPE REF TO lcl_popup.
+
+*----------------------------------------------------------------------*
 * lcl_ai_api - HTTP communication with Anthropic API
 *----------------------------------------------------------------------*
 CLASS lcl_ai_api DEFINITION.
@@ -395,13 +400,13 @@ INITIALIZATION.
 AT SELECTION-SCREEN.
   CHECK sy-ucomm IS INITIAL OR sy-ucomm = 'UCCHECK'.
 
-  DATA(lo_popup) = NEW lcl_popup(
+  go_popup = NEW lcl_popup(
     i_dest   = p_dest
     i_model  = p_model
     i_apikey = CONV string( p_apikey )
     i_provider = COND string( WHEN p_oai = 'X' THEN 'OPENAI' ELSE 'ANTHROPIC' ) ).
 
-  lo_popup->show( ).
+  go_popup->show( ).
 
 *----------------------------------------------------------------------*
 * START-OF-SELECTION - never reached (F8 suppressed)
