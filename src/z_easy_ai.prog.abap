@@ -26,6 +26,7 @@ CLASS lcl_ai_api DEFINITION.
                 i_model          TYPE text255
                 i_apikey         TYPE string
                 i_provider       TYPE string DEFAULT 'ANTHROPIC'
+                i_prompt_cache_key TYPE string OPTIONAL
       RETURNING VALUE(rv_answer) TYPE string.
 
   PRIVATE SECTION.
@@ -33,6 +34,8 @@ CLASS lcl_ai_api DEFINITION.
       build_payload
         IMPORTING i_prompt        TYPE string
                   i_model         TYPE text255
+                  i_provider      TYPE string
+                  i_prompt_cache_key TYPE string OPTIONAL
         RETURNING VALUE(rv_json)  TYPE string,
 
       parse_response
@@ -55,7 +58,11 @@ CLASS lcl_ai_api IMPLEMENTATION.
       lv_provider = 'ANTHROPIC'.
     ENDIF.
 
-    payload = build_payload( i_prompt = i_prompt i_model = i_model ).
+    payload = build_payload(
+      i_prompt           = i_prompt
+      i_model            = i_model
+      i_provider         = lv_provider
+      i_prompt_cache_key = i_prompt_cache_key ).
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING  destination              = i_dest
@@ -104,7 +111,13 @@ CLASS lcl_ai_api IMPLEMENTATION.
   ENDMETHOD.
 
   METHOD build_payload.
-    DATA lv_prompt TYPE string.
+    DATA: lv_prompt           TYPE string,
+          lv_prompt_cache_key TYPE string,
+          lv_provider         TYPE string.
+
+    lv_provider = i_provider.
+    TRANSLATE lv_provider TO UPPER CASE.
+
     lv_prompt = i_prompt.
     REPLACE ALL OCCURRENCES OF '\' IN lv_prompt WITH '\\'.
     REPLACE ALL OCCURRENCES OF '"' IN lv_prompt WITH '\"'.
@@ -114,6 +127,12 @@ CLASS lcl_ai_api IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
 
     rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ '}' }|.
+    IF lv_provider = 'OPENAI' AND i_prompt_cache_key IS NOT INITIAL.
+      lv_prompt_cache_key = i_prompt_cache_key.
+      REPLACE ALL OCCURRENCES OF '\' IN lv_prompt_cache_key WITH '\\'.
+      REPLACE ALL OCCURRENCES OF '"' IN lv_prompt_cache_key WITH '\"'.
+      rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000, "prompt_cache_key": "{ lv_prompt_cache_key }"{ '}' }|.
+    ENDIF.
   ENDMETHOD.
 
   METHOD parse_response.
@@ -221,6 +240,7 @@ CLASS lcl_popup DEFINITION.
           mv_model    TYPE text255,
           mv_apikey   TYPE string,
           mv_provider TYPE string,
+          mv_prompt_cache_key TYPE string,
           mo_dialog   TYPE REF TO cl_gui_dialogbox_container,
           mo_toolbar  TYPE REF TO cl_gui_toolbar,
           mo_split    TYPE REF TO cl_gui_splitter_container,
@@ -244,6 +264,7 @@ CLASS lcl_popup IMPLEMENTATION.
     mv_model    = i_model.
     mv_apikey   = i_apikey.
     mv_provider = i_provider.
+    mv_prompt_cache_key = |{ sy-mandt }-{ sy-uname }-{ sy-datum }-{ sy-uzeit }|.
   ENDMETHOD.
 
   METHOD show.
@@ -377,7 +398,8 @@ CLASS lcl_popup IMPLEMENTATION.
       i_dest    = mv_dest
       i_model   = mv_model
       i_apikey  = mv_apikey
-      i_provider = mv_provider ).
+      i_provider = mv_provider
+      i_prompt_cache_key = mv_prompt_cache_key ).
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
