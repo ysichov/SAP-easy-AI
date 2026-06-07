@@ -267,6 +267,10 @@ CLASS lcl_popup DEFINITION.
       FOR EVENT close OF cl_gui_dialogbox_container.
 
     METHODS ask_ai.
+
+    METHODS format_json
+      IMPORTING i_json         TYPE string
+      RETURNING VALUE(rv_json) TYPE string.
 ENDCLASS.
 
 CLASS lcl_popup IMPLEMENTATION.
@@ -411,14 +415,13 @@ CLASS lcl_popup IMPLEMENTATION.
       RETURN.
     ENDIF.
 
-    " Read JSON schema from center panel
+    " Read JSON schema from center panel (strip trailing spaces from each char-255 line)
     DATA lt_schema_lines TYPE ty_lines.
     mo_schema->get_text_as_stream( IMPORTING text = lt_schema_lines ).
     DATA lv_json_schema TYPE string.
     LOOP AT lt_schema_lines INTO DATA(ls_schema_line).
-      lv_json_schema = lv_json_schema && ls_schema_line.
+      lv_json_schema = lv_json_schema && condense( val = CONV string( ls_schema_line ) no_gaps = abap_false ).
     ENDLOOP.
-    CONDENSE lv_json_schema.
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 50 text = 'Asking AI...'.
@@ -434,6 +437,9 @@ CLASS lcl_popup IMPLEMENTATION.
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
+
+    " Format JSON if applicable
+    lv_answer = format_json( lv_answer ).
 
     " Display answer
     mo_answer->set_readonly_mode( 0 ).
@@ -464,6 +470,92 @@ CLASS lcl_popup IMPLEMENTATION.
     mo_answer->set_readonly_mode( 1 ).
 
     CALL METHOD cl_gui_cfw=>flush.
+  ENDMETHOD.
+
+  METHOD format_json.
+    " Try to detect and pretty-print JSON in the response
+    DATA lv_trimmed TYPE string.
+    lv_trimmed = i_json.
+    CONDENSE lv_trimmed.
+
+    " Check if it looks like JSON object or array
+    DATA lv_first TYPE c LENGTH 1.
+    lv_first = lv_trimmed(1).
+    IF lv_first <> '{' AND lv_first <> '['.
+      rv_json = i_json.
+      RETURN.
+    ENDIF.
+
+    " Walk through characters and add indentation
+    DATA: lv_indent   TYPE i VALUE 0,
+          lv_in_str   TYPE abap_bool VALUE abap_false,
+          lv_escaped  TYPE abap_bool VALUE abap_false,
+          lv_len      TYPE i,
+          lv_char     TYPE c LENGTH 1,
+          lv_prev     TYPE c LENGTH 1,
+          lv_nl       TYPE string,
+          lv_result   TYPE string.
+
+    lv_nl   = cl_abap_char_utilities=>newline.
+    lv_len  = strlen( lv_trimmed ).
+
+    DO lv_len TIMES.
+      DATA lv_pos TYPE i.
+      lv_pos  = sy-index - 1.
+      lv_char = lv_trimmed+lv_pos(1).
+
+      " Handle escape sequences inside strings
+      IF lv_escaped = abap_true.
+        lv_result  = lv_result && lv_char.
+        lv_escaped = abap_false.
+        lv_prev    = lv_char.
+        CONTINUE.
+      ENDIF.
+
+      IF lv_char = '\' AND lv_in_str = abap_true.
+        lv_result  = lv_result && lv_char.
+        lv_escaped = abap_true.
+        lv_prev    = lv_char.
+        CONTINUE.
+      ENDIF.
+
+      " Toggle string mode on unescaped quote
+      IF lv_char = '"'.
+        lv_in_str = COND abap_bool( WHEN lv_in_str = abap_false THEN abap_true ELSE abap_false ).
+        lv_result = lv_result && lv_char.
+        lv_prev   = lv_char.
+        CONTINUE.
+      ENDIF.
+
+      " Outside strings: format structural characters
+      IF lv_in_str = abap_false.
+        CASE lv_char.
+          WHEN '{' OR '['.
+            lv_indent  = lv_indent + 2.
+            lv_result  = lv_result && lv_char && lv_nl && repeat( val = ` ` occ = lv_indent ).
+          WHEN '}' OR ']'.
+            lv_indent  = lv_indent - 2.
+            IF lv_indent < 0. lv_indent = 0. ENDIF.
+            lv_result  = lv_result && lv_nl && repeat( val = ` ` occ = lv_indent ) && lv_char.
+          WHEN ','.
+            lv_result  = lv_result && lv_char && lv_nl && repeat( val = ` ` occ = lv_indent ).
+          WHEN ':'.
+            lv_result  = lv_result && lv_char && ` `.
+          WHEN OTHERS.
+            " Skip whitespace/newlines that were already in the input
+            IF lv_char <> ` ` AND lv_char <> cl_abap_char_utilities=>newline AND
+               lv_char <> cl_abap_char_utilities=>cr_lf(1).
+              lv_result = lv_result && lv_char.
+            ENDIF.
+        ENDCASE.
+      ELSE.
+        lv_result = lv_result && lv_char.
+      ENDIF.
+
+      lv_prev = lv_char.
+    ENDDO.
+
+    rv_json = lv_result.
   ENDMETHOD.
 
 ENDCLASS.
