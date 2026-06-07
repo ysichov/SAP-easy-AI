@@ -27,6 +27,7 @@ CLASS lcl_ai_api DEFINITION.
                 i_apikey         TYPE string
                 i_provider       TYPE string DEFAULT 'ANTHROPIC'
                 i_prompt_cache_key TYPE string OPTIONAL
+                i_json_schema    TYPE string OPTIONAL
       RETURNING VALUE(rv_answer) TYPE string.
 
   PRIVATE SECTION.
@@ -36,6 +37,7 @@ CLASS lcl_ai_api DEFINITION.
                   i_model         TYPE text255
                   i_provider      TYPE string
                   i_prompt_cache_key TYPE string OPTIONAL
+                  i_json_schema   TYPE string OPTIONAL
         RETURNING VALUE(rv_json)  TYPE string,
 
       parse_response
@@ -62,7 +64,8 @@ CLASS lcl_ai_api IMPLEMENTATION.
       i_prompt           = i_prompt
       i_model            = i_model
       i_provider         = lv_provider
-      i_prompt_cache_key = i_prompt_cache_key ).
+      i_prompt_cache_key = i_prompt_cache_key
+      i_json_schema      = i_json_schema ).
 
     CALL METHOD cl_http_client=>create_by_destination
       EXPORTING  destination              = i_dest
@@ -129,12 +132,17 @@ CLASS lcl_ai_api IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN lv_prompt WITH '\f'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
 
-    rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ '}' }|.
+    DATA lv_response_format TYPE string.
+    IF i_json_schema IS NOT INITIAL.
+      lv_response_format = |, "response_format": { i_json_schema }|.
+    ENDIF.
+
+    rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ lv_response_format }{ '}' }|.
     IF lv_provider = 'OPENAI' AND i_prompt_cache_key IS NOT INITIAL.
       lv_prompt_cache_key = i_prompt_cache_key.
       REPLACE ALL OCCURRENCES OF '\' IN lv_prompt_cache_key WITH '\\'.
       REPLACE ALL OCCURRENCES OF '"' IN lv_prompt_cache_key WITH '\"'.
-      rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000, "prompt_cache_key": "{ lv_prompt_cache_key }"{ '}' }|.
+      rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000, "prompt_cache_key": "{ lv_prompt_cache_key }"{ lv_response_format }{ '}' }|.
     ENDIF.
   ENDMETHOD.
 
@@ -248,6 +256,7 @@ CLASS lcl_popup DEFINITION.
           mo_toolbar  TYPE REF TO cl_gui_toolbar,
           mo_split    TYPE REF TO cl_gui_splitter_container,
           mo_question TYPE REF TO cl_gui_textedit,
+          mo_schema   TYPE REF TO cl_gui_textedit,
           mo_answer   TYPE REF TO cl_gui_textedit.
 
     METHODS on_toolbar_click
@@ -327,28 +336,37 @@ CLASS lcl_popup IMPLEMENTATION.
 
     SET HANDLER on_toolbar_click FOR mo_toolbar.
 
-    " Horizontal splitter: left=question, right=answer
+    " Horizontal splitter: left=question, center=json schema, right=answer
     CREATE OBJECT mo_split
       EXPORTING
         parent  = lo_editors_cont
         rows    = 1
-        columns = 2
+        columns = 3
       EXCEPTIONS
         OTHERS  = 1.
 
-    mo_split->set_column_width( id = 1 width = 50 ).
-    mo_split->set_column_width( id = 2 width = 50 ).
+    mo_split->set_column_width( id = 1 width = 40 ).
+    mo_split->set_column_width( id = 2 width = 25 ).
+    mo_split->set_column_width( id = 3 width = 35 ).
 
-    DATA lo_left  TYPE REF TO cl_gui_container.
-    DATA lo_right TYPE REF TO cl_gui_container.
-    lo_left  = mo_split->get_container( row = 1 column = 1 ).
-    lo_right = mo_split->get_container( row = 1 column = 2 ).
+    DATA lo_left   TYPE REF TO cl_gui_container.
+    DATA lo_center TYPE REF TO cl_gui_container.
+    DATA lo_right  TYPE REF TO cl_gui_container.
+    lo_left   = mo_split->get_container( row = 1 column = 1 ).
+    lo_center = mo_split->get_container( row = 1 column = 2 ).
+    lo_right  = mo_split->get_container( row = 1 column = 3 ).
 
     " Question editor (left)
     CREATE OBJECT mo_question
       EXPORTING parent = lo_left
       EXCEPTIONS OTHERS = 1.
-    mo_question->set_toolbar_mode( 0 ).  " 0 = toolbar off
+    mo_question->set_toolbar_mode( 0 ).
+
+    " JSON schema editor (center)
+    CREATE OBJECT mo_schema
+      EXPORTING parent = lo_center
+      EXCEPTIONS OTHERS = 1.
+    mo_schema->set_toolbar_mode( 0 ).
 
     " Answer editor (right, readonly)
     CREATE OBJECT mo_answer
@@ -393,6 +411,15 @@ CLASS lcl_popup IMPLEMENTATION.
       RETURN.
     ENDIF.
 
+    " Read JSON schema from center panel
+    DATA lt_schema_lines TYPE ty_lines.
+    mo_schema->get_text_as_stream( IMPORTING text = lt_schema_lines ).
+    DATA lv_json_schema TYPE string.
+    LOOP AT lt_schema_lines INTO DATA(ls_schema_line).
+      lv_json_schema = lv_json_schema && ls_schema_line.
+    ENDLOOP.
+    CONDENSE lv_json_schema.
+
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 50 text = 'Asking AI...'.
 
@@ -402,7 +429,8 @@ CLASS lcl_popup IMPLEMENTATION.
       i_model   = mv_model
       i_apikey  = mv_apikey
       i_provider = mv_provider
-      i_prompt_cache_key = mv_prompt_cache_key ).
+      i_prompt_cache_key = mv_prompt_cache_key
+      i_json_schema      = lv_json_schema ).
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
