@@ -420,7 +420,21 @@ CLASS lcl_popup IMPLEMENTATION.
     mo_schema->get_text_as_stream( IMPORTING text = lt_schema_lines ).
     DATA lv_json_schema TYPE string.
     LOOP AT lt_schema_lines INTO DATA(ls_schema_line).
-      lv_json_schema = lv_json_schema && condense( val = CONV string( ls_schema_line ) no_gaps = abap_false ).
+      DATA lv_schema_str TYPE string.
+      DATA lv_slen       TYPE i.
+      lv_schema_str = ls_schema_line.
+      " Remove trailing spaces from char-255 field padding
+      lv_slen = strlen( lv_schema_str ).
+      WHILE lv_slen > 0.
+        lv_slen = lv_slen - 1.
+        IF lv_schema_str+lv_slen(1) <> ` `.
+          lv_slen = lv_slen + 1.
+          EXIT.
+        ENDIF.
+      ENDWHILE.
+      IF lv_slen > 0.
+        lv_json_schema = lv_json_schema && lv_schema_str+0(lv_slen).
+      ENDIF.
     ENDLOOP.
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
