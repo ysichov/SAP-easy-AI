@@ -452,6 +452,12 @@ CLASS lcl_popup IMPLEMENTATION.
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
 
+    " Replace literal \n \r \t escape sequences with real characters
+    REPLACE ALL OCCURRENCES OF '\n' IN lv_answer WITH cl_abap_char_utilities=>newline.
+    REPLACE ALL OCCURRENCES OF '\r' IN lv_answer WITH ''.
+    REPLACE ALL OCCURRENCES OF '\t' IN lv_answer WITH cl_abap_char_utilities=>horizontal_tab.
+    REPLACE ALL OCCURRENCES OF '\"' IN lv_answer WITH '"'.
+
     " Format JSON if applicable
     lv_answer = format_json( lv_answer ).
 
