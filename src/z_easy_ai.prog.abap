@@ -453,13 +453,16 @@ CLASS lcl_popup IMPLEMENTATION.
       EXPORTING percentage = 0 text = ''.
 
     " Replace literal \n \r \t escape sequences with real characters
+    " Note: do NOT replace \" before format_json - it would break string boundary detection
     REPLACE ALL OCCURRENCES OF '\n' IN lv_answer WITH cl_abap_char_utilities=>newline.
     REPLACE ALL OCCURRENCES OF '\r' IN lv_answer WITH ''.
     REPLACE ALL OCCURRENCES OF '\t' IN lv_answer WITH cl_abap_char_utilities=>horizontal_tab.
-    REPLACE ALL OCCURRENCES OF '\"' IN lv_answer WITH '"'.
 
-    " Format JSON if applicable
+    " Format JSON if applicable (handles \" escape internally via lv_escaped flag)
     lv_answer = format_json( lv_answer ).
+
+    " After formatting, unescape remaining \" to real quotes
+    REPLACE ALL OCCURRENCES OF '\"' IN lv_answer WITH '"'.
 
     " Display answer
     mo_answer->set_readonly_mode( 0 ).
