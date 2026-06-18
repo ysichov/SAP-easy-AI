@@ -17,10 +17,18 @@ PARAMETERS: p_prov   TYPE ty_prov  AS LISTBOX VISIBLE LENGTH 30
             p_apikey TYPE text255  MEMORY ID api.
 SELECTION-SCREEN END OF BLOCK b_api.
 
+SELECTION-SCREEN BEGIN OF BLOCK b_files WITH FRAME TITLE TEXT-002.
+PARAMETERS: p_folder TYPE text255 DEFAULT 'C:\soft\GitHub\ABAP-AI-Code\TOOLS',
+            p_file   TYPE text255 AS LISTBOX VISIBLE LENGTH 50
+                     USER-COMMAND file.
+SELECTION-SCREEN END OF BLOCK b_files.
+
 " Remembers provider+key the model list was built for (avoid re-fetch on Enter).
 DATA gv_loaded_key TYPE string.
 " Cached model listbox values - re-applied on every PBO so the list persists.
-DATA gt_model_vrm  TYPE vrm_values.
+DATA gt_model_vrm    TYPE vrm_values.
+DATA gv_loaded_folder TYPE string.
+DATA gt_file_vrm      TYPE vrm_values.
 
 *----------------------------------------------------------------------*
 * lcl_ai_api - direct HTTP communication with the LLM API (no SM59)
@@ -588,7 +596,9 @@ CLASS lcl_popup DEFINITION.
       IMPORTING i_base_url TYPE string
                 i_model    TYPE text255
                 i_apikey   TYPE string
-                i_provider TYPE string.
+                i_provider TYPE string
+                i_question TYPE string OPTIONAL
+                i_schema   TYPE string OPTIONAL.
 
     METHODS show.
 
@@ -597,6 +607,8 @@ CLASS lcl_popup DEFINITION.
           mv_model    TYPE text255,
           mv_apikey   TYPE string,
           mv_provider TYPE string,
+          mv_question TYPE string,
+          mv_schema   TYPE string,
           mo_dialog   TYPE REF TO cl_gui_dialogbox_container,
           mo_toolbar  TYPE REF TO cl_gui_toolbar,
           mo_split    TYPE REF TO cl_gui_splitter_container,
@@ -625,6 +637,8 @@ CLASS lcl_popup IMPLEMENTATION.
     mv_model    = i_model.
     mv_apikey   = i_apikey.
     mv_provider = i_provider.
+    mv_question = i_question.
+    mv_schema   = i_schema.
   ENDMETHOD.
 
   METHOD show.
@@ -720,6 +734,18 @@ CLASS lcl_popup IMPLEMENTATION.
     CREATE OBJECT mo_answer
       EXPORTING parent = lo_right
       EXCEPTIONS OTHERS = 1.
+
+    " Pre-fill question and schema from file if provided
+    IF mv_question IS NOT INITIAL.
+      DATA lt_qlines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+      SPLIT mv_question AT cl_abap_char_utilities=>newline INTO TABLE lt_qlines.
+      mo_question->set_text_as_stream( text = lt_qlines ).
+    ENDIF.
+    IF mv_schema IS NOT INITIAL.
+      DATA lt_slines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+      SPLIT mv_schema AT cl_abap_char_utilities=>newline INTO TABLE lt_slines.
+      mo_schema->set_text_as_stream( text = lt_slines ).
+    ENDIF.
 
     CALL METHOD cl_gui_cfw=>flush.
   ENDMETHOD.
@@ -991,6 +1017,36 @@ AT SELECTION-SCREEN OUTPUT.
     EXPORTING id     = 'P_MODEL'
               values = gt_model_vrm.
 
+  " File listbox: rescan folder when path changes
+  DATA(lv_folder) = CONV string( p_folder ).
+  CONDENSE lv_folder.
+  IF lv_folder IS NOT INITIAL AND gv_loaded_folder <> lv_folder.
+    CLEAR gt_file_vrm.
+    DATA lt_md_files TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lt_md_dirs  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_md_cnt   TYPE i.
+    cl_gui_frontend_services=>directory_list_files(
+      EXPORTING directory         = lv_folder
+                filter            = '*.md'
+      CHANGING  file_table        = lt_md_files
+                count             = lv_md_cnt
+                directories_table = lt_md_dirs
+      EXCEPTIONS OTHERS = 1 ).
+    SORT lt_md_files.
+    LOOP AT lt_md_files INTO DATA(lv_md_fname).
+      APPEND VALUE #( key = lv_md_fname text = lv_md_fname ) TO gt_file_vrm.
+    ENDLOOP.
+    IF gt_file_vrm IS NOT INITIAL.
+      p_file = gt_file_vrm[ 1 ]-key.
+    ELSE.
+      CLEAR p_file.
+    ENDIF.
+    gv_loaded_folder = lv_folder.
+  ENDIF.
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING id     = 'P_FILE'
+              values = gt_file_vrm.
+
 *----------------------------------------------------------------------*
 * AT SELECTION-SCREEN - open popup on Enter (once key + model are set)
 *----------------------------------------------------------------------*
@@ -1001,11 +1057,64 @@ AT SELECTION-SCREEN.
     RETURN.
   ENDIF.
 
+  " Read selected .md and optional matching .json from presentation server
+  DATA lv_question TYPE string.
+  DATA lv_schema   TYPE string.
+  IF p_file IS NOT INITIAL AND p_folder IS NOT INITIAL.
+    DATA(lv_md_path) = CONV string( p_folder ).
+    CONDENSE lv_md_path.
+    DATA(lv_last_idx) = strlen( lv_md_path ) - 1.
+    IF lv_last_idx >= 0.
+      DATA(lv_last_char) = lv_md_path+lv_last_idx(1).
+      IF lv_last_char <> '\' AND lv_last_char <> '/'.
+        lv_md_path = lv_md_path && '\'.
+      ENDIF.
+    ENDIF.
+    lv_md_path = lv_md_path && CONV string( p_file ).
+
+    DATA lt_upload TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    cl_gui_frontend_services=>gui_upload(
+      EXPORTING filename = lv_md_path
+                filetype = 'ASC'
+      CHANGING  data_tab = lt_upload
+      EXCEPTIONS OTHERS  = 1 ).
+    LOOP AT lt_upload INTO DATA(lv_ul_line).
+      IF lv_question IS NOT INITIAL.
+        lv_question = lv_question && cl_abap_char_utilities=>newline.
+      ENDIF.
+      lv_question = lv_question && lv_ul_line.
+    ENDLOOP.
+
+    " Try to read matching .json (same base name)
+    DATA(lv_json_path) = lv_md_path.
+    REPLACE REGEX '\.md$' IN lv_json_path WITH '.json'.
+    IF lv_json_path <> lv_md_path.
+      DATA lv_json_exists TYPE abap_bool.
+      cl_gui_frontend_services=>file_exist(
+        EXPORTING file   = lv_json_path
+        CHANGING  result = lv_json_exists
+        EXCEPTIONS OTHERS = 1 ).
+      IF lv_json_exists = abap_true.
+        CLEAR lt_upload.
+        cl_gui_frontend_services=>gui_upload(
+          EXPORTING filename = lv_json_path
+                    filetype = 'ASC'
+          CHANGING  data_tab = lt_upload
+          EXCEPTIONS OTHERS  = 1 ).
+        LOOP AT lt_upload INTO lv_ul_line.
+          lv_schema = lv_schema && lv_ul_line.
+        ENDLOOP.
+      ENDIF.
+    ENDIF.
+  ENDIF.
+
   go_popup = NEW lcl_popup(
     i_base_url = lcl_ai_api=>base_url( p_prov )
     i_model    = p_model
     i_apikey   = CONV string( p_apikey )
-    i_provider = lcl_ai_api=>provider_of( p_prov ) ).
+    i_provider = lcl_ai_api=>provider_of( p_prov )
+    i_question = lv_question
+    i_schema   = lv_schema ).
 
   go_popup->show( ).
 
