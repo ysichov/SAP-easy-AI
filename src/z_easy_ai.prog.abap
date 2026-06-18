@@ -191,19 +191,26 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     DATA(lv_json) = o_client->response->get_cdata( ).
 
-    " Both Anthropic and OpenAI-compatible APIs return models under "data[].id".
-    TYPES: BEGIN OF ty_m,
-             id TYPE string,
-           END OF ty_m,
-           BEGIN OF ty_res,
-             data TYPE STANDARD TABLE OF ty_m WITH DEFAULT KEY,
-           END OF ty_res.
-    DATA ls_res TYPE ty_res.
-    /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_res ).
-
-    LOOP AT ls_res-data INTO DATA(ls).
-      APPEND ls-id TO et_ids.
-    ENDLOOP.
+    " Both Anthropic and OpenAI-compatible (Mistral/OpenAI) APIs return models as
+    " data[].id. Extract every "id":"..." directly - a string scan is immune to
+    " the structure/field quirks that can make /ui2/cl_json return an empty table
+    " on large model lists. Only the model objects carry an "id" key.
+    DATA lv_off  TYPE i.
+    DATA lv_from TYPE i.
+    DATA lv_id   TYPE string.
+    DO.
+      FIND FIRST OCCURRENCE OF REGEX '"id"\s*:\s*"([^"]*)"'
+        IN SECTION OFFSET lv_from OF lv_json
+        SUBMATCHES lv_id
+        MATCH OFFSET lv_off.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+      IF lv_id IS NOT INITIAL.
+        APPEND lv_id TO et_ids.
+      ENDIF.
+      lv_from = lv_off + 5.   " advance past this "id" marker
+    ENDDO.
 
     IF et_ids IS INITIAL.
       DATA(lv_len) = nmin( val1 = strlen( lv_json ) val2 = 150 ).
