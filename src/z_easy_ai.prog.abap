@@ -736,8 +736,8 @@ CLASS lcl_popup IMPLEMENTATION.
       EXCEPTIONS OTHERS = 1.
 
     " Pre-fill question and schema from file if provided
-    TYPES: ty_pre_line(255) TYPE c,
-           ty_pre_lines     TYPE TABLE OF ty_pre_line.
+    TYPES: ty_pre_line(4096) TYPE c,
+           ty_pre_lines      TYPE TABLE OF ty_pre_line.
     IF mv_question IS NOT INITIAL.
       DATA lt_qlines TYPE ty_pre_lines.
       DATA lt_q_str  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
@@ -1105,6 +1105,9 @@ AT SELECTION-SCREEN.
         EXCEPTIONS OTHERS  = 1 ).
       IF sy-subrc = 0.
         LOOP AT lt_upload INTO lv_ul_line.
+          IF lv_schema IS NOT INITIAL.
+            lv_schema = lv_schema && cl_abap_char_utilities=>newline.
+          ENDIF.
           lv_schema = lv_schema && lv_ul_line.
         ENDLOOP.
       ENDIF.
