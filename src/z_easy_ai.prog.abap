@@ -721,16 +721,18 @@ AT SELECTION-SCREEN OUTPUT.
       APPEND VALUE #( key = lv_id text = lv_id ) TO gt_model_vrm.
     ENDLOOP.
 
-    " Default the selection to the first model when nothing valid is chosen.
-    IF lt_ids IS NOT INITIAL
-       AND ( p_model IS INITIAL OR NOT line_exists( lt_ids[ table_line = p_model ] ) ).
-      p_model = lt_ids[ 1 ].
-    ENDIF.
-
-    " Remember the loaded state only on success, so a failed call (e.g. wrong
-    " key) is retried on the next refresh instead of being cached as "done".
     IF lt_ids IS NOT INITIAL.
+      " Default to the first model when the current one is not in the new list.
+      IF p_model IS INITIAL OR NOT line_exists( lt_ids[ table_line = p_model ] ).
+        p_model = lt_ids[ 1 ].
+      ENDIF.
+      " Remember the loaded state only on success, so a failed call (e.g. a key
+      " that does not match the chosen provider) is retried on the next refresh.
       gv_loaded_key = lv_state.
+    ELSE.
+      " Fetch failed / empty: clear the stale model so the listbox does not keep
+      " showing the previous provider's value as a single leftover entry.
+      CLEAR p_model.
     ENDIF.
   ENDIF.
 
