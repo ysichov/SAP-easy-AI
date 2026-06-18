@@ -12,21 +12,9 @@
    <TPOOL>
     <item>
      <ID>S</ID>
-     <KEY>P_ANTH</KEY>
-     <ENTRY>Anthropic</ENTRY>
-     <LENGTH>17</LENGTH>
-    </item>
-    <item>
-     <ID>S</ID>
      <KEY>P_APIKEY</KEY>
      <ENTRY>API Key</ENTRY>
      <LENGTH>15</LENGTH>
-    </item>
-    <item>
-     <ID>S</ID>
-     <KEY>P_DEST</KEY>
-     <ENTRY>Destination</ENTRY>
-     <LENGTH>19</LENGTH>
     </item>
     <item>
      <ID>S</ID>
@@ -36,9 +24,9 @@
     </item>
     <item>
      <ID>S</ID>
-     <KEY>P_OAI</KEY>
-     <ENTRY>OpenAI</ENTRY>
-     <LENGTH>14</LENGTH>
+     <KEY>P_PROV</KEY>
+     <ENTRY>Provider</ENTRY>
+     <LENGTH>13</LENGTH>
     </item>
    </TPOOL>
   </asx:values>

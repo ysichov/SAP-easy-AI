@@ -1,34 +1,58 @@
 *&---------------------------------------------------------------------*
 *& Report Z_EASY_AI
 *&---------------------------------------------------------------------*
-*& Easy AI API example with GUI popup
+*& Easy AI API example with GUI popup.
+*& Calls the LLM API directly via create_by_url (no SM59 destination).
+*& Provider is chosen from a listbox (Anthropic / Mistral URL); the model
+*& is picked from a dropdown filled live from <base>/v1/models.
 *&---------------------------------------------------------------------*
 REPORT z_easy_ai.
 
-SELECTION-SCREEN BEGIN OF BLOCK b_api WITH FRAME TITLE TEXT-001.
-PARAMETERS: p_anth RADIOBUTTON GROUP api DEFAULT 'X',
-            p_oai  RADIOBUTTON GROUP api.
+TYPES ty_prov TYPE c LENGTH 12.
 
-PARAMETERS: p_dest   TYPE text255 MEMORY ID dest,
-            p_model  TYPE text255 MEMORY ID model,
-            p_apikey TYPE text255 MEMORY ID api.
+SELECTION-SCREEN BEGIN OF BLOCK b_api WITH FRAME TITLE TEXT-001.
+PARAMETERS: p_prov   TYPE ty_prov  AS LISTBOX VISIBLE LENGTH 30
+                     USER-COMMAND prov DEFAULT 'ANTHROPIC',     " provider (holds base URL)
+            p_model  TYPE text255  AS LISTBOX VISIBLE LENGTH 45 MEMORY ID model,
+            p_apikey TYPE text255  MEMORY ID api.
 SELECTION-SCREEN END OF BLOCK b_api.
 
+" Remembers provider+key the model list was built for (avoid re-fetch on Enter).
+DATA gv_loaded_key TYPE string.
 
 *----------------------------------------------------------------------*
-* lcl_ai_api - HTTP communication with Anthropic API
+* lcl_ai_api - direct HTTP communication with the LLM API (no SM59)
 *----------------------------------------------------------------------*
 CLASS lcl_ai_api DEFINITION.
   PUBLIC SECTION.
+    TYPES tt_ids TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+
+    " Base URL for a provider code (ANTHROPIC / MISTRAL).
+    CLASS-METHODS base_url
+      IMPORTING i_prov       TYPE clike
+      RETURNING VALUE(rv_url) TYPE string.
+
+    " 'ANTHROPIC' for Anthropic, otherwise 'OPENAI' (Mistral is OpenAI-compatible).
+    CLASS-METHODS provider_of
+      IMPORTING i_prov            TYPE clike
+      RETURNING VALUE(rv_provider) TYPE string.
+
     CLASS-METHODS ask
       IMPORTING i_prompt         TYPE string
-                i_dest           TYPE text255
+                i_base_url       TYPE string
                 i_model          TYPE text255
                 i_apikey         TYPE string
                 i_provider       TYPE string DEFAULT 'ANTHROPIC'
-                i_prompt_cache_key TYPE string OPTIONAL
                 i_json_schema    TYPE string OPTIONAL
       RETURNING VALUE(rv_answer) TYPE string.
+
+    " GET <base>/v1/models -> list of model ids.
+    CLASS-METHODS list_models
+      IMPORTING i_base_url TYPE string
+                i_apikey   TYPE string
+                i_provider TYPE string
+      EXPORTING et_ids     TYPE tt_ids
+                e_error    TYPE string.
 
   PRIVATE SECTION.
     CLASS-METHODS:
@@ -36,88 +60,158 @@ CLASS lcl_ai_api DEFINITION.
         IMPORTING i_prompt        TYPE string
                   i_model         TYPE text255
                   i_provider      TYPE string
-                  i_prompt_cache_key TYPE string OPTIONAL
                   i_json_schema   TYPE string OPTIONAL
         RETURNING VALUE(rv_json)  TYPE string,
 
       parse_response
         IMPORTING i_json           TYPE string
                   i_provider       TYPE string
-        RETURNING VALUE(rv_answer) TYPE string.
+        RETURNING VALUE(rv_answer) TYPE string,
+
+      " Sets Content-Type + provider auth headers on the request.
+      set_auth_headers
+        IMPORTING io_client  TYPE REF TO if_http_client
+                  i_provider TYPE string
+                  i_apikey   TYPE string.
 ENDCLASS.
 
 CLASS lcl_ai_api IMPLEMENTATION.
 
-  METHOD ask.
-    DATA: payload  TYPE string,
-          o_client TYPE REF TO if_http_client.
-    DATA: lv_provider TYPE string,
-          lv_auth     TYPE string.
+  METHOD base_url.
+    DATA(lv_prov) = CONV string( i_prov ).
+    TRANSLATE lv_prov TO UPPER CASE.
+    rv_url = COND #( WHEN lv_prov = 'MISTRAL'
+                     THEN 'https://api.mistral.ai'
+                     ELSE 'https://api.anthropic.com' ).
+  ENDMETHOD.
 
-    lv_provider = i_provider.
+  METHOD provider_of.
+    DATA(lv_prov) = CONV string( i_prov ).
+    TRANSLATE lv_prov TO UPPER CASE.
+    rv_provider = COND #( WHEN lv_prov = 'ANTHROPIC' THEN 'ANTHROPIC' ELSE 'OPENAI' ).
+  ENDMETHOD.
+
+  METHOD set_auth_headers.
+    io_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
+    IF i_provider = 'ANTHROPIC'.
+      io_client->request->set_header_field( name = 'anthropic-version' value = '2023-06-01' ).
+      io_client->request->set_header_field( name = 'x-api-key'         value = i_apikey ).
+    ELSE.
+      DATA(lv_auth) = i_apikey.
+      IF lv_auth CP 'Bearer *' OR lv_auth CP 'bearer *'.
+        io_client->request->set_header_field( name = 'Authorization' value = lv_auth ).
+      ELSE.
+        io_client->request->set_header_field( name = 'Authorization' value = |Bearer { lv_auth }| ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD ask.
+    DATA o_client TYPE REF TO if_http_client.
+
+    DATA(lv_provider) = i_provider.
     TRANSLATE lv_provider TO UPPER CASE.
     IF lv_provider IS INITIAL.
       lv_provider = 'ANTHROPIC'.
     ENDIF.
 
-    payload = build_payload(
-      i_prompt           = i_prompt
-      i_model            = i_model
-      i_provider         = lv_provider
-      i_prompt_cache_key = i_prompt_cache_key
-      i_json_schema      = i_json_schema ).
+    " Anthropic: /v1/messages ; OpenAI-compatible (Mistral): /v1/chat/completions
+    DATA(lv_url) = i_base_url &&
+      COND string( WHEN lv_provider = 'ANTHROPIC'
+                   THEN '/v1/messages'
+                   ELSE '/v1/chat/completions' ).
 
-    CALL METHOD cl_http_client=>create_by_destination
-      EXPORTING  destination              = i_dest
-      IMPORTING  client                   = o_client
-      EXCEPTIONS destination_not_found    = 2
-                 OTHERS                   = 5.
-
-    IF sy-subrc = 2.
-      rv_answer = 'Error: Destination not found (check SM59)'.
-      RETURN.
-    ELSEIF sy-subrc <> 0.
-      rv_answer = |Error: cl_http_client rc={ sy-subrc }|.
+    cl_http_client=>create_by_url(
+      EXPORTING url    = lv_url
+                ssl_id = 'ANONYM'
+      IMPORTING client = o_client
+      EXCEPTIONS OTHERS = 4 ).
+    IF sy-subrc <> 0.
+      rv_answer = |Error: create_by_url failed rc={ sy-subrc } (check URL / SSL in STRUST)|.
       RETURN.
     ENDIF.
 
-    o_client->request->set_header_field( name = 'Content-Type' value = 'application/json' ).
-    IF lv_provider = 'OPENAI'.
-      lv_auth = i_apikey.
-      IF lv_auth CP 'Bearer *' OR lv_auth CP 'bearer *'.
-        o_client->request->set_header_field( name = 'Authorization' value = lv_auth ).
-      ELSE.
-        o_client->request->set_header_field( name = 'Authorization' value = |Bearer { lv_auth }| ).
-      ENDIF.
-    ELSE.
-      o_client->request->set_header_field( name = 'anthropic-version' value = '2023-06-01' ).
-      o_client->request->set_header_field( name = 'x-api-key'         value = i_apikey ).
-    ENDIF.
+    set_auth_headers( io_client = o_client i_provider = lv_provider i_apikey = i_apikey ).
     o_client->request->set_method( 'POST' ).
-    o_client->request->set_cdata( payload ).
+    o_client->request->set_cdata( build_payload(
+      i_prompt      = i_prompt
+      i_model       = i_model
+      i_provider    = lv_provider
+      i_json_schema = i_json_schema ) ).
+    " Suppress the SAP logon popup so a 401/403 returns the JSON error body.
+    o_client->propertytype_logon_popup = if_http_client=>co_disabled.
 
-    o_client->send(
-      EXCEPTIONS http_communication_failure = 1
-                 OTHERS                     = 5 ).
-
+    o_client->send( EXCEPTIONS http_communication_failure = 1 OTHERS = 5 ).
     IF sy-subrc <> 0.
       rv_answer = 'Error: HTTP send failed'.
       RETURN.
     ENDIF.
+    o_client->receive( EXCEPTIONS http_communication_failure = 1 OTHERS = 4 ).
 
-    o_client->receive(
-      EXCEPTIONS http_communication_failure = 1
-                 OTHERS                     = 4 ).
+    rv_answer = parse_response(
+      i_json     = o_client->response->get_cdata( )
+      i_provider = lv_provider ).
+  ENDMETHOD.
 
-    DATA(lv_response) = o_client->response->get_cdata( ).
-    rv_answer = parse_response( i_json = lv_response i_provider = lv_provider ).
+  METHOD list_models.
+    DATA o_client TYPE REF TO if_http_client.
+
+    CLEAR: et_ids, e_error.
+
+    DATA(lv_provider) = i_provider.
+    TRANSLATE lv_provider TO UPPER CASE.
+
+    cl_http_client=>create_by_url(
+      EXPORTING url    = |{ i_base_url }/v1/models|
+                ssl_id = 'ANONYM'
+      IMPORTING client = o_client
+      EXCEPTIONS OTHERS = 4 ).
+    IF sy-subrc <> 0.
+      e_error = |create_by_url failed rc={ sy-subrc }|.
+      RETURN.
+    ENDIF.
+
+    set_auth_headers( io_client = o_client i_provider = lv_provider i_apikey = i_apikey ).
+    o_client->request->set_method( 'GET' ).
+    o_client->propertytype_logon_popup = if_http_client=>co_disabled.
+
+    o_client->send( EXCEPTIONS http_communication_failure = 1 OTHERS = 2 ).
+    IF sy-subrc <> 0.
+      e_error = 'HTTP send failed'.
+      RETURN.
+    ENDIF.
+    o_client->receive( EXCEPTIONS http_communication_failure = 1 OTHERS = 2 ).
+    IF sy-subrc <> 0.
+      e_error = 'HTTP receive failed'.
+      RETURN.
+    ENDIF.
+
+    DATA(lv_json) = o_client->response->get_cdata( ).
+
+    " Both Anthropic and OpenAI-compatible APIs return models under "data[].id".
+    TYPES: BEGIN OF ty_m,
+             id TYPE string,
+           END OF ty_m,
+           BEGIN OF ty_res,
+             data TYPE STANDARD TABLE OF ty_m WITH DEFAULT KEY,
+           END OF ty_res.
+    DATA ls_res TYPE ty_res.
+    /ui2/cl_json=>deserialize( EXPORTING json = lv_json CHANGING data = ls_res ).
+
+    LOOP AT ls_res-data INTO DATA(ls).
+      APPEND ls-id TO et_ids.
+    ENDLOOP.
+
+    IF et_ids IS INITIAL.
+      DATA(lv_len) = nmin( val1 = strlen( lv_json ) val2 = 150 ).
+      e_error = |Unexpected response: { lv_json(lv_len) }|.
+    ENDIF.
   ENDMETHOD.
 
   METHOD build_payload.
-    DATA: lv_prompt           TYPE string,
-          lv_prompt_cache_key TYPE string,
-          lv_provider         TYPE string,
-          lv_cr               TYPE c LENGTH 1.
+    DATA: lv_prompt   TYPE string,
+          lv_provider TYPE string,
+          lv_cr       TYPE c LENGTH 1.
 
     lv_provider = i_provider.
     TRANSLATE lv_provider TO UPPER CASE.
@@ -132,18 +226,13 @@ CLASS lcl_ai_api IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN lv_prompt WITH '\f'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
 
+    " response_format (json_schema) is OpenAI-only - Anthropic ignores it
     DATA lv_response_format TYPE string.
-    IF i_json_schema IS NOT INITIAL.
+    IF i_json_schema IS NOT INITIAL AND lv_provider = 'OPENAI'.
       lv_response_format = |, "response_format": { i_json_schema }|.
     ENDIF.
 
     rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ lv_response_format }{ '}' }|.
-    IF lv_provider = 'OPENAI' AND i_prompt_cache_key IS NOT INITIAL.
-      lv_prompt_cache_key = i_prompt_cache_key.
-      REPLACE ALL OCCURRENCES OF '\' IN lv_prompt_cache_key WITH '\\'.
-      REPLACE ALL OCCURRENCES OF '"' IN lv_prompt_cache_key WITH '\"'.
-      rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000, "prompt_cache_key": "{ lv_prompt_cache_key }"{ lv_response_format }{ '}' }|.
-    ENDIF.
   ENDMETHOD.
 
   METHOD parse_response.
@@ -155,6 +244,8 @@ CLASS lcl_ai_api IMPLEMENTATION.
              completion_tokens     TYPE string,
              total_tokens          TYPE string,
              prompt_tokens_details TYPE t_prompt_tokens_details,
+             input_tokens          TYPE string,
+             output_tokens         TYPE string,
            END OF t_usage,
            BEGIN OF t_content_block,
              type TYPE string,
@@ -220,8 +311,8 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     IF response-content IS NOT INITIAL.
       lv_text = response-content[ 1 ]-text.
-      IF response-usage-total_tokens IS NOT INITIAL.
-        lv_usage_info = |Tokens: input={ response-usage-prompt_tokens } output={ response-usage-completion_tokens } total={ response-usage-total_tokens }|.
+      IF response-usage-input_tokens IS NOT INITIAL.
+        lv_usage_info = |Tokens: input={ response-usage-input_tokens } output={ response-usage-output_tokens }|.
         rv_answer = lv_text && cl_abap_char_utilities=>newline && cl_abap_char_utilities=>newline && lv_usage_info.
       ELSE.
         rv_answer = lv_text.
@@ -239,19 +330,18 @@ ENDCLASS.
 CLASS lcl_popup DEFINITION.
   PUBLIC SECTION.
     METHODS constructor
-      IMPORTING i_dest   TYPE text255
-                i_model  TYPE text255
-                i_apikey TYPE string
+      IMPORTING i_base_url TYPE string
+                i_model    TYPE text255
+                i_apikey   TYPE string
                 i_provider TYPE string.
 
     METHODS show.
 
   PRIVATE SECTION.
-    DATA: mv_dest     TYPE text255,
+    DATA: mv_base_url TYPE string,
           mv_model    TYPE text255,
           mv_apikey   TYPE string,
           mv_provider TYPE string,
-          mv_prompt_cache_key TYPE string,
           mo_dialog   TYPE REF TO cl_gui_dialogbox_container,
           mo_toolbar  TYPE REF TO cl_gui_toolbar,
           mo_split    TYPE REF TO cl_gui_splitter_container,
@@ -276,11 +366,10 @@ ENDCLASS.
 CLASS lcl_popup IMPLEMENTATION.
 
   METHOD constructor.
-    mv_dest     = i_dest.
+    mv_base_url = i_base_url.
     mv_model    = i_model.
     mv_apikey   = i_apikey.
     mv_provider = i_provider.
-    mv_prompt_cache_key = |{ sy-mandt }-{ sy-uname }-{ sy-datum }-{ sy-uzeit }|.
   ENDMETHOD.
 
   METHOD show.
@@ -441,13 +530,12 @@ CLASS lcl_popup IMPLEMENTATION.
       EXPORTING percentage = 50 text = 'Asking AI...'.
 
     DATA(lv_answer) = lcl_ai_api=>ask(
-      i_prompt  = lv_prompt
-      i_dest    = mv_dest
-      i_model   = mv_model
-      i_apikey  = mv_apikey
-      i_provider = mv_provider
-      i_prompt_cache_key = mv_prompt_cache_key
-      i_json_schema      = lv_json_schema ).
+      i_prompt      = lv_prompt
+      i_base_url    = mv_base_url
+      i_model       = mv_model
+      i_apikey      = mv_apikey
+      i_provider    = mv_provider
+      i_json_schema = lv_json_schema ).
 
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
@@ -589,9 +677,17 @@ ENDCLASS.
 DATA go_popup TYPE REF TO lcl_popup.
 
 *----------------------------------------------------------------------*
-* INITIALIZATION - suppress F8 (ONLI) button
+* INITIALIZATION - fill the provider listbox, suppress F8 (ONLI)
 *----------------------------------------------------------------------*
 INITIALIZATION.
+  DATA lt_prov TYPE vrm_values.
+  lt_prov = VALUE #(
+    ( key = 'ANTHROPIC' text = 'https://api.anthropic.com' )
+    ( key = 'MISTRAL'   text = 'https://api.mistral.ai' ) ).
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING id     = 'P_PROV'
+              values = lt_prov.
+
   DATA lt_excl TYPE TABLE OF sy-ucomm.
   APPEND 'ONLI' TO lt_excl.
   CALL FUNCTION 'RS_SET_SELSCREEN_STATUS'
@@ -599,16 +695,55 @@ INITIALIZATION.
     TABLES     p_exclude = lt_excl.
 
 *----------------------------------------------------------------------*
-* AT SELECTION-SCREEN - open popup on Enter
+* AT SELECTION-SCREEN OUTPUT - fill the model listbox live from the API
+*----------------------------------------------------------------------*
+AT SELECTION-SCREEN OUTPUT.
+  " Re-fetch the model list only when provider or key changed.
+  DATA(lv_state) = |{ p_prov }|{ p_apikey }|.
+  IF p_apikey IS NOT INITIAL AND gv_loaded_key <> lv_state.
+
+    DATA: lt_ids TYPE lcl_ai_api=>tt_ids,
+          lv_err TYPE string.
+    lcl_ai_api=>list_models(
+      EXPORTING i_base_url = lcl_ai_api=>base_url( p_prov )
+                i_apikey   = CONV string( p_apikey )
+                i_provider = lcl_ai_api=>provider_of( p_prov )
+      IMPORTING et_ids     = lt_ids
+                e_error    = lv_err ).
+
+    DATA lt_vrm TYPE vrm_values.
+    CLEAR lt_vrm.
+    LOOP AT lt_ids INTO DATA(lv_id).
+      APPEND VALUE #( key = lv_id text = lv_id ) TO lt_vrm.
+    ENDLOOP.
+    CALL FUNCTION 'VRM_SET_VALUES'
+      EXPORTING id     = 'P_MODEL'
+                values = lt_vrm.
+
+    " Default the selection to the first model when nothing valid is chosen.
+    IF lt_ids IS NOT INITIAL
+       AND ( p_model IS INITIAL OR NOT line_exists( lt_ids[ table_line = p_model ] ) ).
+      p_model = lt_ids[ 1 ].
+    ENDIF.
+
+    gv_loaded_key = lv_state.
+  ENDIF.
+
+*----------------------------------------------------------------------*
+* AT SELECTION-SCREEN - open popup on Enter (once key + model are set)
 *----------------------------------------------------------------------*
 AT SELECTION-SCREEN.
   CHECK sy-ucomm IS INITIAL OR sy-ucomm = 'UCCHECK'.
 
+  IF p_apikey IS INITIAL OR p_model IS INITIAL.
+    RETURN.
+  ENDIF.
+
   go_popup = NEW lcl_popup(
-    i_dest   = p_dest
-    i_model  = p_model
-    i_apikey = CONV string( p_apikey )
-    i_provider = COND string( WHEN p_oai = 'X' THEN 'OPENAI' ELSE 'ANTHROPIC' ) ).
+    i_base_url = lcl_ai_api=>base_url( p_prov )
+    i_model    = p_model
+    i_apikey   = CONV string( p_apikey )
+    i_provider = lcl_ai_api=>provider_of( p_prov ) ).
 
   go_popup->show( ).
 
