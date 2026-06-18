@@ -335,6 +335,251 @@ CLASS lcl_ai_api IMPLEMENTATION.
 ENDCLASS.
 
 *----------------------------------------------------------------------*
+* lcl_html - markdown -> HTML renderer (ported from ZCL_CODE_HTML_GEN)
+*----------------------------------------------------------------------*
+CLASS lcl_html DEFINITION.
+  PUBLIC SECTION.
+    " Wraps the rendered markdown body in a full HTML document with CSS.
+    CLASS-METHODS answer_to_html
+      IMPORTING i_answer       TYPE string
+                i_source       TYPE string OPTIONAL
+                i_title        TYPE string OPTIONAL
+      RETURNING VALUE(rv_html) TYPE string.
+
+  PRIVATE SECTION.
+    CLASS-METHODS render_abap_blocks
+      IMPORTING i_text         TYPE string
+      RETURNING VALUE(rv_text) TYPE string.
+    CLASS-METHODS render_markdown_text
+      IMPORTING i_text         TYPE string
+      RETURNING VALUE(rv_html) TYPE string.
+    CLASS-METHODS render_inline_markdown
+      IMPORTING i_text         TYPE string
+      RETURNING VALUE(rv_html) TYPE string.
+    CLASS-METHODS normalize_markdown
+      IMPORTING i_text         TYPE string
+      RETURNING VALUE(rv_text) TYPE string.
+    CLASS-METHODS code_block_to_html
+      IMPORTING i_code         TYPE string
+      RETURNING VALUE(rv_html) TYPE string.
+    CLASS-METHODS source_block_to_html
+      IMPORTING i_source       TYPE string
+                i_title        TYPE string
+      RETURNING VALUE(rv_html) TYPE string.
+    CLASS-METHODS escape_html
+      IMPORTING i_text         TYPE string
+      RETURNING VALUE(rv_text) TYPE string.
+ENDCLASS.
+
+CLASS lcl_html IMPLEMENTATION.
+
+  METHOD answer_to_html.
+    DATA lv_text_upper TYPE string.
+
+    lv_text_upper = i_answer.
+    SHIFT lv_text_upper LEFT DELETING LEADING space.
+    TRANSLATE lv_text_upper TO UPPER CASE.
+
+    IF lv_text_upper CP '<!DOCTYPE HTML*'
+    OR lv_text_upper CP '<!DOCTYPE*'
+    OR lv_text_upper CP '<HTML*'.
+      rv_html = i_answer.
+    ELSE.
+      DATA(lv_render_text) = render_abap_blocks( i_answer ).
+      DATA(lv_source_html) = source_block_to_html(
+        i_source = i_source
+        i_title  = COND #( WHEN i_title IS NOT INITIAL THEN i_title ELSE 'Source code' ) ).
+
+      rv_html = |<!doctype html><html><head><meta charset="utf-8">|
+             && |<style>body\{font-family:"Segoe UI",Arial,sans-serif;font-size:14px;margin:0;|
+             && |min-height:100vh;background:linear-gradient(135deg,#f8fbff 0%,#eef6ff 45%,#f7fff9 100%);|
+             && |color:#1f2933;\}|
+             && |.answer\{white-space:pre-wrap;font-family:"Segoe UI",Arial,sans-serif;line-height:1.45;|
+             && |margin:14px;padding:16px 18px;background:rgba(255,255,255,.88);border:1px solid #dce8f6;|
+             && |box-shadow:0 2px 10px rgba(56,96,140,.10);\}|
+             && |.md_h\{display:block;font-size:17px;font-weight:700;color:#23476f;margin:4px 0 8px\}|
+             && |.md_h2\{display:block;font-size:15px;font-weight:700;color:#23476f;margin:4px 0 6px\}|
+             && |.md_li\{display:block;margin:2px 0 2px 18px;text-indent:-18px\}|
+             && |code\{font-family:Consolas,monospace;background:#eef3f8;border:1px solid #d7e0ea;|
+             && |padding:0 4px;color:#18324a\}|
+             && |strong\{font-weight:700\}|
+             && |.tokens\{display:inline-block;color:#005ea8;font-weight:700;background:#e8f3ff;|
+             && |border:1px solid #b9dcff;padding:3px 7px;margin-top:6px;\}|
+             && |.code_tbl\{border-collapse:collapse;width:100%;font:12px/1.5 Consolas,monospace;|
+             && |background:#fff;border:1px solid #d7e0ea;margin:10px 0;\}|
+             && |.source_title\{font-weight:700;color:#23476f;margin:14px 0 6px\}|
+             && |.code_tbl tr:hover td\{background:#f0f4fa\}|
+             && |.ln\{color:#aaa;text-align:right;padding:1px 10px 1px 5px;min-width:42px;|
+             && |border-right:1px solid #e0e0e0;white-space:nowrap;background:#fafafa;user-select:none;\}|
+             && |.cd\{padding:1px 8px;white-space:pre;\}|
+             && |.cd-error\{padding:1px 8px;white-space:pre;color:red;font-weight:bold;\}|
+             && |table.md\{border-collapse:collapse;margin:10px 0;\}|
+             && |table.md th,table.md td\{border:1px solid #d7e0ea;padding:4px 8px;text-align:left;\}|
+             && |table.md th\{background:#eef3f8;\}|
+             && |</style></head><body><div class="answer">|
+             && lv_render_text
+             && lv_source_html
+             && |</div></body></html>|.
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD render_abap_blocks.
+    DATA lv_rest       TYPE string.
+    DATA lv_before     TYPE string.
+    DATA lv_code       TYPE string.
+    DATA lv_after      TYPE string.
+    DATA lv_start      TYPE i.
+    DATA lv_end        TYPE i.
+    DATA lv_code_start TYPE i.
+    DATA lv_fence_len  TYPE i.
+
+    lv_rest = i_text.
+
+    DO.
+      FIND FIRST OCCURRENCE OF REGEX '```\s*[A-Za-z0-9_-]*\s*' IN lv_rest
+        MATCH OFFSET lv_start
+        MATCH LENGTH lv_fence_len.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+
+      lv_before     = substring( val = lv_rest len = lv_start ).
+      lv_code_start = lv_start + lv_fence_len.
+      lv_after      = substring( val = lv_rest off = lv_code_start ).
+      FIND FIRST OCCURRENCE OF '```' IN lv_after MATCH OFFSET lv_end.
+      IF sy-subrc <> 0.
+        EXIT.
+      ENDIF.
+
+      lv_code = substring( val = lv_after len = lv_end ).
+      SHIFT lv_code LEFT DELETING LEADING cl_abap_char_utilities=>newline.
+      rv_text = rv_text
+             && render_markdown_text( lv_before )
+             && code_block_to_html( lv_code ).
+      lv_rest = substring( val = lv_after off = lv_end + 3 ).
+    ENDDO.
+
+    rv_text = rv_text && render_markdown_text( lv_rest ).
+  ENDMETHOD.
+
+  METHOD render_markdown_text.
+    DATA lt_lines   TYPE STANDARD TABLE OF string WITH NON-UNIQUE DEFAULT KEY.
+    DATA lv_text    TYPE string.
+    DATA lv_hashes  TYPE string.
+    DATA lv_content TYPE string.
+    DATA lv_marker  TYPE string.
+    DATA lv_item    TYPE string.
+
+    lv_text = normalize_markdown( i_text ).
+    SPLIT lv_text AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+
+    LOOP AT lt_lines INTO DATA(lv_line).
+      DATA(lv_trimmed) = lv_line.
+      SHIFT lv_trimmed LEFT DELETING LEADING space.
+
+      IF lv_trimmed IS INITIAL.
+        rv_html = rv_html && cl_abap_char_utilities=>newline.
+        CONTINUE.
+      ENDIF.
+
+      FIND FIRST OCCURRENCE OF REGEX '^(#{1,6})\s+(.+)$' IN lv_trimmed
+        SUBMATCHES lv_hashes lv_content.
+      IF sy-subrc = 0.
+        rv_html = rv_html
+               && |<div class="{ COND #( WHEN strlen( lv_hashes ) <= 1 THEN 'md_h' ELSE 'md_h2' ) }">{ render_inline_markdown( lv_content ) }</div>|
+               && cl_abap_char_utilities=>newline.
+        CONTINUE.
+      ENDIF.
+
+      FIND FIRST OCCURRENCE OF REGEX '^([0-9]+\.)\s+(.+)$' IN lv_trimmed
+        SUBMATCHES lv_marker lv_item.
+      IF sy-subrc = 0.
+        rv_html = rv_html
+               && |<div class="md_li">{ escape_html( lv_marker ) } { render_inline_markdown( lv_item ) }</div>|
+               && cl_abap_char_utilities=>newline.
+        CONTINUE.
+      ENDIF.
+
+      FIND FIRST OCCURRENCE OF REGEX '^-\s+(.+)$' IN lv_trimmed
+        SUBMATCHES lv_item.
+      IF sy-subrc = 0.
+        rv_html = rv_html
+               && |<div class="md_li">- { render_inline_markdown( lv_item ) }</div>|
+               && cl_abap_char_utilities=>newline.
+        CONTINUE.
+      ENDIF.
+
+      FIND FIRST OCCURRENCE OF REGEX '^Tokens:' IN lv_trimmed.
+      IF sy-subrc = 0.
+        rv_html = rv_html
+               && |<span class="tokens">{ render_inline_markdown( lv_trimmed ) }</span>|
+               && cl_abap_char_utilities=>newline.
+        CONTINUE.
+      ENDIF.
+
+      rv_html = rv_html
+             && render_inline_markdown( lv_line )
+             && cl_abap_char_utilities=>newline.
+    ENDLOOP.
+  ENDMETHOD.
+
+  METHOD render_inline_markdown.
+    rv_html = escape_html( i_text ).
+    REPLACE ALL OCCURRENCES OF REGEX '\*\*([^*]+)\*\*' IN rv_html WITH '<strong>$1</strong>'.
+    REPLACE ALL OCCURRENCES OF REGEX '`([^`]+)`' IN rv_html WITH '<code>$1</code>'.
+  ENDMETHOD.
+
+  METHOD normalize_markdown.
+    rv_text = i_text.
+    DATA(lv_nl) = cl_abap_char_utilities=>newline.
+
+    REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>cr_lf IN rv_text WITH lv_nl.
+    REPLACE ALL OCCURRENCES OF REGEX '\s+(#{1,6})\s+' IN rv_text WITH |{ lv_nl }{ lv_nl }$1 |.
+    REPLACE ALL OCCURRENCES OF REGEX '\s+([0-9]+)\.\s+(\*\*)' IN rv_text WITH |{ lv_nl }$1. $2|.
+    REPLACE ALL OCCURRENCES OF REGEX '\s+-\s+' IN rv_text WITH |{ lv_nl }- |.
+  ENDMETHOD.
+
+  METHOD code_block_to_html.
+    DATA lt_lines TYPE STANDARD TABLE OF string WITH NON-UNIQUE DEFAULT KEY.
+    DATA lv_lno   TYPE i.
+
+    SPLIT i_code AT cl_abap_char_utilities=>newline INTO TABLE lt_lines.
+    rv_html = |<table class="code_tbl"><tbody>|.
+
+    LOOP AT lt_lines INTO DATA(lv_line).
+      lv_lno = lv_lno + 1.
+      DATA(lv_class) = COND string(
+        WHEN lv_line CS 'was not found or cannot be read'
+          THEN 'cd-error'
+          ELSE 'cd' ).
+      rv_html = rv_html
+             && |<tr><td class="ln">{ lv_lno }</td>|
+             && |<td class="{ lv_class }">{ escape_html( i_text = lv_line ) }</td></tr>|.
+    ENDLOOP.
+
+    rv_html = rv_html && |</tbody></table>|.
+  ENDMETHOD.
+
+  METHOD source_block_to_html.
+    IF i_source IS INITIAL.
+      RETURN.
+    ENDIF.
+    rv_html = cl_abap_char_utilities=>newline
+           && |<div class="source_title">{ escape_html( i_title ) }</div>|
+           && code_block_to_html( i_source ).
+  ENDMETHOD.
+
+  METHOD escape_html.
+    rv_text = i_text.
+    REPLACE ALL OCCURRENCES OF '&' IN rv_text WITH '&amp;'.
+    REPLACE ALL OCCURRENCES OF '<' IN rv_text WITH '&lt;'.
+    REPLACE ALL OCCURRENCES OF '>' IN rv_text WITH '&gt;'.
+    REPLACE ALL OCCURRENCES OF '"' IN rv_text WITH '&quot;'.
+  ENDMETHOD.
+
+ENDCLASS.
+
+*----------------------------------------------------------------------*
 * lcl_popup - GUI popup with splitter: left=question, right=answer
 *----------------------------------------------------------------------*
 CLASS lcl_popup DEFINITION.
@@ -357,7 +602,7 @@ CLASS lcl_popup DEFINITION.
           mo_split    TYPE REF TO cl_gui_splitter_container,
           mo_question TYPE REF TO cl_gui_textedit,
           mo_schema   TYPE REF TO cl_gui_textedit,
-          mo_answer   TYPE REF TO cl_gui_textedit.
+          mo_answer   TYPE REF TO cl_gui_html_viewer.
 
     METHODS on_toolbar_click
       FOR EVENT function_selected OF cl_gui_toolbar
@@ -471,12 +716,10 @@ CLASS lcl_popup IMPLEMENTATION.
       EXCEPTIONS OTHERS = 1.
     mo_schema->set_toolbar_mode( 0 ).
 
-    " Answer editor (right, readonly)
+    " Answer viewer (right): HTML viewer to render the markdown answer
     CREATE OBJECT mo_answer
       EXPORTING parent = lo_right
       EXCEPTIONS OTHERS = 1.
-    mo_answer->set_toolbar_mode( 0 ).
-    mo_answer->set_readonly_mode( 1 ).
 
     CALL METHOD cl_gui_cfw=>flush.
   ENDMETHOD.
@@ -550,45 +793,40 @@ CLASS lcl_popup IMPLEMENTATION.
     CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
       EXPORTING percentage = 0 text = ''.
 
-    " Replace literal \n \r \t escape sequences with real characters
-    " Note: do NOT replace \" before format_json - it would break string boundary detection
+    " Replace literal \n \r \t \" escape sequences with real characters so the
+    " markdown renderer sees real line breaks.
     REPLACE ALL OCCURRENCES OF '\n' IN lv_answer WITH cl_abap_char_utilities=>newline.
     REPLACE ALL OCCURRENCES OF '\r' IN lv_answer WITH ''.
     REPLACE ALL OCCURRENCES OF '\t' IN lv_answer WITH cl_abap_char_utilities=>horizontal_tab.
-
-    " Format JSON if applicable (handles \" escape internally via lv_escaped flag)
-    lv_answer = format_json( lv_answer ).
-
-    " After formatting, unescape remaining \" to real quotes
     REPLACE ALL OCCURRENCES OF '\"' IN lv_answer WITH '"'.
 
-    " Display answer
-    mo_answer->set_readonly_mode( 0 ).
+    " Render markdown -> HTML and load it into the answer viewer.
+    DATA(lv_html) = lcl_html=>answer_to_html( i_answer = lv_answer ).
 
-    DATA lt_answer TYPE ty_lines.
-    DATA ls_answer TYPE ty_line.
-    DATA lt_raw    TYPE TABLE OF string.
-    SPLIT lv_answer AT cl_abap_char_utilities=>newline INTO TABLE lt_raw.
-    IF lt_raw IS INITIAL.
-      APPEND lv_answer TO lt_raw.
-    ENDIF.
-    LOOP AT lt_raw INTO DATA(lv_raw_line).
-      IF strlen( lv_raw_line ) = 0.
-        CLEAR ls_answer.
-        APPEND ls_answer TO lt_answer.
-      ELSE.
-        WHILE strlen( lv_raw_line ) > 255.
-          ls_answer = lv_raw_line(255).
-          APPEND ls_answer TO lt_answer.
-          lv_raw_line = substring( val = lv_raw_line off = 255 ).
-        ENDWHILE.
-        ls_answer = lv_raw_line.
-        APPEND ls_answer TO lt_answer.
-      ENDIF.
-    ENDLOOP.
+    DATA lt_html   TYPE STANDARD TABLE OF w3html WITH DEFAULT KEY.
+    DATA ls_html   TYPE w3html.
+    DATA lv_offset TYPE i.
+    WHILE lv_offset < strlen( lv_html ).
+      CLEAR ls_html.
+      ls_html-line = substring(
+        val = lv_html
+        off = lv_offset
+        len = nmin( val1 = 255 val2 = strlen( lv_html ) - lv_offset ) ).
+      APPEND ls_html TO lt_html.
+      lv_offset = lv_offset + 255.
+    ENDWHILE.
 
-    mo_answer->set_text_as_stream( text = lt_answer ).
-    mo_answer->set_readonly_mode( 1 ).
+    DATA lv_url TYPE c LENGTH 255.
+    mo_answer->load_data(
+      EXPORTING  type         = 'text'
+                 subtype      = 'html'
+      IMPORTING  assigned_url = lv_url
+      CHANGING   data_table   = lt_html
+      EXCEPTIONS OTHERS       = 1 ).
+
+    mo_answer->show_url(
+      EXPORTING url = lv_url
+      EXCEPTIONS OTHERS = 1 ).
 
     CALL METHOD cl_gui_cfw=>flush.
   ENDMETHOD.
