@@ -1023,14 +1023,12 @@ AT SELECTION-SCREEN OUTPUT.
   IF lv_folder IS NOT INITIAL AND gv_loaded_folder <> lv_folder.
     CLEAR gt_file_vrm.
     DATA lt_md_files TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
-    DATA lt_md_dirs  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA lv_md_cnt   TYPE i.
     cl_gui_frontend_services=>directory_list_files(
-      EXPORTING directory        = lv_folder
-                filter           = '*.md'
-      CHANGING  file_table       = lt_md_files
-                count            = lv_md_cnt
-                directories_only = lt_md_dirs
+      EXPORTING directory  = lv_folder
+                filter     = '*.md'
+      CHANGING  file_table = lt_md_files
+                count      = lv_md_cnt
       EXCEPTIONS OTHERS = 1 ).
     SORT lt_md_files.
     LOOP AT lt_md_files INTO DATA(lv_md_fname).
@@ -1089,18 +1087,13 @@ AT SELECTION-SCREEN.
     DATA(lv_json_path) = lv_md_path.
     REPLACE REGEX '\.md$' IN lv_json_path WITH '.json'.
     IF lv_json_path <> lv_md_path.
-      DATA lv_json_exists TYPE abap_bool.
-      cl_gui_frontend_services=>file_exist(
-        EXPORTING file   = lv_json_path
-        CHANGING  result = lv_json_exists
-        EXCEPTIONS OTHERS = 1 ).
-      IF lv_json_exists = abap_true.
-        CLEAR lt_upload.
-        cl_gui_frontend_services=>gui_upload(
-          EXPORTING filename = lv_json_path
-                    filetype = 'ASC'
-          CHANGING  data_tab = lt_upload
-          EXCEPTIONS OTHERS  = 1 ).
+      CLEAR lt_upload.
+      cl_gui_frontend_services=>gui_upload(
+        EXPORTING filename = lv_json_path
+                  filetype = 'ASC'
+        CHANGING  data_tab = lt_upload
+        EXCEPTIONS OTHERS  = 1 ).
+      IF sy-subrc = 0.
         LOOP AT lt_upload INTO lv_ul_line.
           lv_schema = lv_schema && lv_ul_line.
         ENDLOOP.
