@@ -736,14 +736,24 @@ CLASS lcl_popup IMPLEMENTATION.
       EXCEPTIONS OTHERS = 1.
 
     " Pre-fill question and schema from file if provided
+    TYPES: ty_pre_line(255) TYPE c,
+           ty_pre_lines     TYPE TABLE OF ty_pre_line.
     IF mv_question IS NOT INITIAL.
-      DATA lt_qlines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
-      SPLIT mv_question AT cl_abap_char_utilities=>newline INTO TABLE lt_qlines.
+      DATA lt_qlines TYPE ty_pre_lines.
+      DATA lt_q_str  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+      SPLIT mv_question AT cl_abap_char_utilities=>newline INTO TABLE lt_q_str.
+      LOOP AT lt_q_str INTO DATA(lv_qs).
+        APPEND CONV ty_pre_line( lv_qs ) TO lt_qlines.
+      ENDLOOP.
       mo_question->set_text_as_stream( text = lt_qlines ).
     ENDIF.
     IF mv_schema IS NOT INITIAL.
-      DATA lt_slines TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
-      SPLIT mv_schema AT cl_abap_char_utilities=>newline INTO TABLE lt_slines.
+      DATA lt_slines TYPE ty_pre_lines.
+      DATA lt_s_str  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+      SPLIT mv_schema AT cl_abap_char_utilities=>newline INTO TABLE lt_s_str.
+      LOOP AT lt_s_str INTO DATA(lv_ss).
+        APPEND CONV ty_pre_line( lv_ss ) TO lt_slines.
+      ENDLOOP.
       mo_schema->set_text_as_stream( text = lt_slines ).
     ENDIF.
 
