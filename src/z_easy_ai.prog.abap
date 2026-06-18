@@ -1096,8 +1096,12 @@ AT SELECTION-SCREEN.
     " Try to read matching .json / .JSON (same base name)
     DATA lv_json_path TYPE string.
     DATA lt_json_upload TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
-    REPLACE REGEX '(?i)\.md$' IN lv_md_path WITH ''.
     DATA(lv_base_path) = lv_md_path.
+    DATA(lv_bp_len) = strlen( lv_base_path ).
+    DATA(lv_bp_off) = lv_bp_len - 3.
+    IF lv_bp_off >= 0 AND ( lv_base_path+lv_bp_off(3) = '.md' OR lv_base_path+lv_bp_off(3) = '.MD' ).
+      lv_base_path = lv_base_path(lv_bp_off).
+    ENDIF.
     LOOP AT VALUE string_table( ( `json` ) ( `JSON` ) ) INTO DATA(lv_ext).
       lv_json_path = lv_base_path && '.' && lv_ext.
       CLEAR lt_json_upload.
