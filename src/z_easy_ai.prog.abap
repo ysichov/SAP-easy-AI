@@ -73,6 +73,19 @@ CLASS lcl_ai_api DEFINITION.
                   i_json_schema   TYPE string OPTIONAL
         RETURNING VALUE(rv_json)  TYPE string,
 
+      " Converts OpenAI tools array -> Anthropic tools array.
+      " {"type":"function","function":{"name":..,"parameters":{..}}}
+      " -> {"name":..,"description":..,"input_schema":{..}}
+      build_anthropic_tools
+        IMPORTING i_tools_json     TYPE string
+        RETURNING VALUE(rv_json)   TYPE string,
+
+      " Returns balanced {...} object starting at/after i_offset.
+      extract_json_object
+        IMPORTING i_text           TYPE string
+                  i_offset         TYPE i DEFAULT 0
+        RETURNING VALUE(rv_object) TYPE string,
+
       parse_response
         IMPORTING i_json           TYPE string
                   i_provider       TYPE string
@@ -244,13 +257,151 @@ CLASS lcl_ai_api IMPLEMENTATION.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>form_feed IN lv_prompt WITH '\f'.
     REPLACE ALL OCCURRENCES OF cl_abap_char_utilities=>horizontal_tab IN lv_prompt WITH '\t'.
 
-    " response_format (json_schema) is OpenAI-only - Anthropic ignores it
+    " Detect if i_json_schema is a tool definition or a response_format schema.
+    " Tool definitions contain "type":"function"; schemas start with plain { }.
+    DATA lv_tools_field     TYPE string.
     DATA lv_response_format TYPE string.
-    IF i_json_schema IS NOT INITIAL AND lv_provider = 'OPENAI'.
-      lv_response_format = |, "response_format": { i_json_schema }|.
+    IF i_json_schema IS NOT INITIAL.
+      DATA(lv_is_tool) = abap_false.
+      IF i_json_schema CS '"type":"function"' OR i_json_schema CS '"type": "function"'.
+        lv_is_tool = abap_true.
+      ENDIF.
+
+      IF lv_is_tool = abap_true.
+        DATA lv_tools_arr TYPE string.
+        IF i_json_schema(1) = '['.
+          lv_tools_arr = i_json_schema.
+        ELSE.
+          lv_tools_arr = '[' && i_json_schema && ']'.
+        ENDIF.
+        IF lv_provider = 'ANTHROPIC'.
+          lv_tools_field = |, "tools": { build_anthropic_tools( lv_tools_arr ) }|.
+        ELSE.
+          lv_tools_field = |, "tools": { lv_tools_arr }|.
+        ENDIF.
+      ELSE.
+        " Response format schema
+        IF lv_provider = 'OPENAI'.
+          lv_response_format = |, "response_format": { '{' }"type": "json_schema", "json_schema": { '{' }"name": "schema", "strict": true, "schema": { i_json_schema }{ '}' }{ '}' }|.
+        ELSEIF lv_provider = 'ANTHROPIC'.
+          lv_response_format = |, "output_config": { '{' }"format": { '{' }"type": "json_schema", "schema": { i_json_schema }{ '}' }{ '}' }|.
+        ENDIF.
+      ENDIF.
     ENDIF.
 
-    rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ lv_response_format }{ '}' }|.
+    rv_json = |{ '{' }"model": "{ i_model }", "messages": [{ '{' }"role": "user", "content": "{ lv_prompt }"{ '}' }], "max_tokens": 2000{ lv_response_format }{ lv_tools_field }{ '}' }|.
+  ENDMETHOD.
+
+  METHOD extract_json_object.
+    DATA lv_start TYPE i.
+    FIND FIRST OCCURRENCE OF '{' IN SECTION OFFSET i_offset OF i_text MATCH OFFSET lv_start.
+    IF sy-subrc <> 0. RETURN. ENDIF.
+    DATA lv_depth TYPE i.
+    DATA lv_instr TYPE abap_bool.
+    DATA lv_esc   TYPE abap_bool.
+    DATA lv_i     TYPE i.
+    DATA lv_len   TYPE i.
+    lv_i   = lv_start.
+    lv_len = strlen( i_text ).
+    WHILE lv_i < lv_len.
+      DATA(lv_ch) = i_text+lv_i(1).
+      rv_object = rv_object && lv_ch.
+      IF lv_instr = abap_true.
+        IF lv_esc = abap_true.
+          lv_esc = abap_false.
+        ELSEIF lv_ch = '\'.
+          lv_esc = abap_true.
+        ELSEIF lv_ch = '"'.
+          lv_instr = abap_false.
+        ENDIF.
+      ELSE.
+        CASE lv_ch.
+          WHEN '"'. lv_instr = abap_true.
+          WHEN '{'. lv_depth = lv_depth + 1.
+          WHEN '}'.
+            lv_depth = lv_depth - 1.
+            IF lv_depth = 0. EXIT. ENDIF.
+        ENDCASE.
+      ENDIF.
+      lv_i = lv_i + 1.
+    ENDWHILE.
+  ENDMETHOD.
+
+  METHOD build_anthropic_tools.
+    " Strip outer [] brackets
+    DATA(lv_inner) = i_tools_json.
+    IF strlen( lv_inner ) >= 1 AND lv_inner(1) = '['.
+      lv_inner = lv_inner+1.
+    ENDIF.
+    DATA lv_tail TYPE i.
+    lv_tail = strlen( lv_inner ) - 1.
+    IF lv_tail >= 0 AND lv_inner+lv_tail(1) = ']'.
+      lv_inner = lv_inner(lv_tail).
+    ENDIF.
+
+    " Split into individual tool objects
+    DATA lt_tools TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lv_cur   TYPE string.
+    DATA lv_depth TYPE i.
+    DATA lv_instr TYPE abap_bool.
+    DATA lv_esc   TYPE abap_bool.
+    DATA lv_idx   TYPE i.
+    DATA lv_total TYPE i.
+    lv_total = strlen( lv_inner ).
+    WHILE lv_idx < lv_total.
+      DATA(lv_c) = lv_inner+lv_idx(1).
+      IF lv_instr = abap_true.
+        lv_cur = lv_cur && lv_c.
+        IF lv_esc = abap_true.
+          lv_esc = abap_false.
+        ELSEIF lv_c = '\'.
+          lv_esc = abap_true.
+        ELSEIF lv_c = '"'.
+          lv_instr = abap_false.
+        ENDIF.
+      ELSE.
+        CASE lv_c.
+          WHEN '"'. lv_instr = abap_true. lv_cur = lv_cur && lv_c.
+          WHEN '{'. lv_depth = lv_depth + 1. lv_cur = lv_cur && lv_c.
+          WHEN '}'.
+            lv_depth = lv_depth - 1.
+            lv_cur = lv_cur && lv_c.
+            IF lv_depth = 0. APPEND lv_cur TO lt_tools. CLEAR lv_cur. ENDIF.
+          WHEN OTHERS.
+            IF lv_depth > 0. lv_cur = lv_cur && lv_c. ENDIF.
+        ENDCASE.
+      ENDIF.
+      lv_idx = lv_idx + 1.
+    ENDWHILE.
+
+    " Convert each tool: extract "function" object, rename parameters->input_schema
+    DATA lv_result TYPE string.
+    DATA lv_count  TYPE i.
+    DATA(lv_lines) = lines( lt_tools ).
+    LOOP AT lt_tools INTO DATA(lv_tool).
+      lv_count = lv_count + 1.
+      DATA lv_fpos TYPE i.
+      DATA lv_anth TYPE string.
+      FIND FIRST OCCURRENCE OF '"function"' IN lv_tool MATCH OFFSET lv_fpos.
+      IF sy-subrc <> 0.
+        lv_anth = lv_tool.
+      ELSE.
+        lv_anth = extract_json_object( i_text = lv_tool i_offset = lv_fpos ).
+        IF lv_anth IS INITIAL. lv_anth = lv_tool. ENDIF.
+        REPLACE FIRST OCCURRENCE OF '"parameters"' IN lv_anth WITH '"input_schema"'.
+      ENDIF.
+      " Add cache_control to last tool
+      IF lv_count = lv_lines.
+        DATA lv_cl TYPE i.
+        lv_cl = strlen( lv_anth ) - 1.
+        lv_anth = lv_anth(lv_cl)
+               && |, "cache_control": { '{' }"type": "ephemeral"{ '}' }|
+               && '}'.
+      ENDIF.
+      IF lv_result IS NOT INITIAL. lv_result = lv_result && ','. ENDIF.
+      lv_result = lv_result && lv_anth.
+    ENDLOOP.
+    rv_json = '[' && lv_result && ']'.
   ENDMETHOD.
 
   METHOD parse_response.
