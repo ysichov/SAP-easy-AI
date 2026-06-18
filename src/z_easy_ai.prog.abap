@@ -1026,11 +1026,11 @@ AT SELECTION-SCREEN OUTPUT.
     DATA lt_md_dirs  TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
     DATA lv_md_cnt   TYPE i.
     cl_gui_frontend_services=>directory_list_files(
-      EXPORTING directory         = lv_folder
-                filter            = '*.md'
-      CHANGING  file_table        = lt_md_files
-                count             = lv_md_cnt
-                directories_table = lt_md_dirs
+      EXPORTING directory        = lv_folder
+                filter           = '*.md'
+      CHANGING  file_table       = lt_md_files
+                count            = lv_md_cnt
+                directories_only = lt_md_dirs
       EXCEPTIONS OTHERS = 1 ).
     SORT lt_md_files.
     LOOP AT lt_md_files INTO DATA(lv_md_fname).
