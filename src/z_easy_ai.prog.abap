@@ -82,9 +82,10 @@ CLASS lcl_ai_api IMPLEMENTATION.
   METHOD base_url.
     DATA(lv_prov) = CONV string( i_prov ).
     TRANSLATE lv_prov TO UPPER CASE.
-    rv_url = COND #( WHEN lv_prov = 'MISTRAL'
-                     THEN 'https://api.mistral.ai'
-                     ELSE 'https://api.anthropic.com' ).
+    rv_url = SWITCH #( lv_prov
+                       WHEN 'MISTRAL' THEN 'https://api.mistral.ai'
+                       WHEN 'OPENAI'  THEN 'https://api.openai.com'
+                       ELSE 'https://api.anthropic.com' ).
   ENDMETHOD.
 
   METHOD provider_of.
@@ -697,6 +698,7 @@ AT SELECTION-SCREEN OUTPUT.
   DATA lt_prov TYPE vrm_values.
   lt_prov = VALUE #(
     ( key = 'ANTHROPIC' text = 'https://api.anthropic.com' )
+    ( key = 'OPENAI'    text = 'https://api.openai.com' )
     ( key = 'MISTRAL'   text = 'https://api.mistral.ai' ) ).
   CALL FUNCTION 'VRM_SET_VALUES'
     EXPORTING id     = 'P_PROV'
