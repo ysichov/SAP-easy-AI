@@ -699,7 +699,7 @@ INITIALIZATION.
 *----------------------------------------------------------------------*
 AT SELECTION-SCREEN OUTPUT.
   " Re-fetch the model list only when provider or key changed.
-  DATA(lv_state) = |{ p_prov }|{ p_apikey }|.
+  DATA(lv_state) = |{ p_prov }\|{ p_apikey }|.
   IF p_apikey IS NOT INITIAL AND gv_loaded_key <> lv_state.
 
     DATA: lt_ids TYPE lcl_ai_api=>tt_ids,
