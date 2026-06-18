@@ -19,6 +19,8 @@ SELECTION-SCREEN END OF BLOCK b_api.
 
 " Remembers provider+key the model list was built for (avoid re-fetch on Enter).
 DATA gv_loaded_key TYPE string.
+" Cached model listbox values - re-applied on every PBO so the list persists.
+DATA gt_model_vrm  TYPE vrm_values.
 
 *----------------------------------------------------------------------*
 * lcl_ai_api - direct HTTP communication with the LLM API (no SM59)
@@ -680,14 +682,6 @@ DATA go_popup TYPE REF TO lcl_popup.
 * INITIALIZATION - fill the provider listbox, suppress F8 (ONLI)
 *----------------------------------------------------------------------*
 INITIALIZATION.
-  DATA lt_prov TYPE vrm_values.
-  lt_prov = VALUE #(
-    ( key = 'ANTHROPIC' text = 'https://api.anthropic.com' )
-    ( key = 'MISTRAL'   text = 'https://api.mistral.ai' ) ).
-  CALL FUNCTION 'VRM_SET_VALUES'
-    EXPORTING id     = 'P_PROV'
-              values = lt_prov.
-
   DATA lt_excl TYPE TABLE OF sy-ucomm.
   APPEND 'ONLI' TO lt_excl.
   CALL FUNCTION 'RS_SET_SELSCREEN_STATUS'
@@ -698,7 +692,18 @@ INITIALIZATION.
 * AT SELECTION-SCREEN OUTPUT - fill the model listbox live from the API
 *----------------------------------------------------------------------*
 AT SELECTION-SCREEN OUTPUT.
-  " Re-fetch the model list only when provider or key changed.
+  " Provider listbox values must be (re)set on every PBO, otherwise they are
+  " lost after a round-trip and the selection does not stick.
+  DATA lt_prov TYPE vrm_values.
+  lt_prov = VALUE #(
+    ( key = 'ANTHROPIC' text = 'https://api.anthropic.com' )
+    ( key = 'MISTRAL'   text = 'https://api.mistral.ai' ) ).
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING id     = 'P_PROV'
+              values = lt_prov.
+
+  " Re-fetch the model list only when provider or key changed; otherwise reuse
+  " the cached list. Re-fetch is skipped on plain Enter (state unchanged).
   DATA(lv_state) = |{ p_prov }\|{ p_apikey }|.
   IF p_apikey IS NOT INITIAL AND gv_loaded_key <> lv_state.
 
@@ -711,14 +716,10 @@ AT SELECTION-SCREEN OUTPUT.
       IMPORTING et_ids     = lt_ids
                 e_error    = lv_err ).
 
-    DATA lt_vrm TYPE vrm_values.
-    CLEAR lt_vrm.
+    CLEAR gt_model_vrm.
     LOOP AT lt_ids INTO DATA(lv_id).
-      APPEND VALUE #( key = lv_id text = lv_id ) TO lt_vrm.
+      APPEND VALUE #( key = lv_id text = lv_id ) TO gt_model_vrm.
     ENDLOOP.
-    CALL FUNCTION 'VRM_SET_VALUES'
-      EXPORTING id     = 'P_MODEL'
-                values = lt_vrm.
 
     " Default the selection to the first model when nothing valid is chosen.
     IF lt_ids IS NOT INITIAL
@@ -726,8 +727,17 @@ AT SELECTION-SCREEN OUTPUT.
       p_model = lt_ids[ 1 ].
     ENDIF.
 
-    gv_loaded_key = lv_state.
+    " Remember the loaded state only on success, so a failed call (e.g. wrong
+    " key) is retried on the next refresh instead of being cached as "done".
+    IF lt_ids IS NOT INITIAL.
+      gv_loaded_key = lv_state.
+    ENDIF.
   ENDIF.
+
+  " Model listbox values, like the provider list, must be set on every PBO.
+  CALL FUNCTION 'VRM_SET_VALUES'
+    EXPORTING id     = 'P_MODEL'
+              values = gt_model_vrm.
 
 *----------------------------------------------------------------------*
 * AT SELECTION-SCREEN - open popup on Enter (once key + model are set)
