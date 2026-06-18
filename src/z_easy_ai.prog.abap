@@ -725,7 +725,10 @@ AT SELECTION-SCREEN OUTPUT.
 
     IF lt_ids IS NOT INITIAL.
       " Default to the first model when the current one is not in the new list.
-      IF p_model IS INITIAL OR NOT line_exists( lt_ids[ table_line = p_model ] ).
+      " CONV string trims the trailing blanks of the char-255 parameter so the
+      " comparison against the (string) ids actually matches.
+      DATA(lv_cur_model) = CONV string( p_model ).
+      IF lv_cur_model IS INITIAL OR NOT line_exists( lt_ids[ table_line = lv_cur_model ] ).
         p_model = lt_ids[ 1 ].
       ENDIF.
       " Remember the loaded state only on success, so a failed call (e.g. a key
