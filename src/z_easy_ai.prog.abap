@@ -1093,25 +1093,29 @@ AT SELECTION-SCREEN.
       lv_question = lv_question && lv_ul_line.
     ENDLOOP.
 
-    " Try to read matching .json (same base name)
-    DATA(lv_json_path) = lv_md_path.
-    REPLACE REGEX '\.md$' IN lv_json_path WITH '.json'.
-    IF lv_json_path <> lv_md_path.
-      CLEAR lt_upload.
+    " Try to read matching .json / .JSON (same base name)
+    DATA lv_json_path TYPE string.
+    DATA lt_json_upload TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    REPLACE REGEX '(?i)\.md$' IN lv_md_path WITH ''.
+    DATA(lv_base_path) = lv_md_path.
+    LOOP AT VALUE string_table( ( `json` ) ( `JSON` ) ) INTO DATA(lv_ext).
+      lv_json_path = lv_base_path && '.' && lv_ext.
+      CLEAR lt_json_upload.
       cl_gui_frontend_services=>gui_upload(
         EXPORTING filename = lv_json_path
                   filetype = 'ASC'
-        CHANGING  data_tab = lt_upload
+        CHANGING  data_tab = lt_json_upload
         EXCEPTIONS OTHERS  = 1 ).
       IF sy-subrc = 0.
-        LOOP AT lt_upload INTO lv_ul_line.
+        LOOP AT lt_json_upload INTO lv_ul_line.
           IF lv_schema IS NOT INITIAL.
             lv_schema = lv_schema && cl_abap_char_utilities=>newline.
           ENDIF.
           lv_schema = lv_schema && lv_ul_line.
         ENDLOOP.
+        EXIT.
       ENDIF.
-    ENDIF.
+    ENDLOOP.
   ENDIF.
 
   go_popup = NEW lcl_popup(
