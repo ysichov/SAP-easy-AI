@@ -1022,7 +1022,7 @@ AT SELECTION-SCREEN OUTPUT.
   CONDENSE lv_folder.
   IF lv_folder IS NOT INITIAL AND gv_loaded_folder <> lv_folder.
     CLEAR gt_file_vrm.
-    DATA lt_md_files TYPE STANDARD TABLE OF string WITH DEFAULT KEY.
+    DATA lt_md_files TYPE filetable.
     DATA lv_md_cnt   TYPE i.
     cl_gui_frontend_services=>directory_list_files(
       EXPORTING directory  = lv_folder
@@ -1030,9 +1030,9 @@ AT SELECTION-SCREEN OUTPUT.
       CHANGING  file_table = lt_md_files
                 count      = lv_md_cnt
       EXCEPTIONS OTHERS = 1 ).
-    SORT lt_md_files.
-    LOOP AT lt_md_files INTO DATA(lv_md_fname).
-      APPEND VALUE #( key = lv_md_fname text = lv_md_fname ) TO gt_file_vrm.
+    SORT lt_md_files BY filename.
+    LOOP AT lt_md_files INTO DATA(ls_md_file).
+      APPEND VALUE #( key = ls_md_file-filename text = ls_md_file-filename ) TO gt_file_vrm.
     ENDLOOP.
     IF gt_file_vrm IS NOT INITIAL.
       p_file = gt_file_vrm[ 1 ]-key.
