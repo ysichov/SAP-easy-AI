@@ -167,10 +167,18 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     o_client->send( EXCEPTIONS http_communication_failure = 1 OTHERS = 5 ).
     IF sy-subrc <> 0.
-      rv_answer = 'Error: HTTP send failed'.
+      DATA(lv_err_code) = 0.
+      DATA(lv_err_msg)  = ``.
+      o_client->get_last_error( IMPORTING code = lv_err_code message = lv_err_msg ).
+      rv_answer = |Error: HTTP send failed (code={ lv_err_code } msg={ lv_err_msg })|.
       RETURN.
     ENDIF.
     o_client->receive( EXCEPTIONS http_communication_failure = 1 OTHERS = 4 ).
+    IF sy-subrc <> 0.
+      o_client->get_last_error( IMPORTING code = lv_err_code message = lv_err_msg ).
+      rv_answer = |Error: HTTP receive failed (code={ lv_err_code } msg={ lv_err_msg })|.
+      RETURN.
+    ENDIF.
 
     rv_answer = parse_response(
       i_json     = o_client->response->get_cdata( )
@@ -201,12 +209,16 @@ CLASS lcl_ai_api IMPLEMENTATION.
 
     o_client->send( EXCEPTIONS http_communication_failure = 1 OTHERS = 2 ).
     IF sy-subrc <> 0.
-      e_error = 'HTTP send failed'.
+      DATA(lv_err_code2) = 0.
+      DATA(lv_err_msg2)  = ``.
+      o_client->get_last_error( IMPORTING code = lv_err_code2 message = lv_err_msg2 ).
+      e_error = |HTTP send failed (code={ lv_err_code2 } msg={ lv_err_msg2 })|.
       RETURN.
     ENDIF.
     o_client->receive( EXCEPTIONS http_communication_failure = 1 OTHERS = 2 ).
     IF sy-subrc <> 0.
-      e_error = 'HTTP receive failed'.
+      o_client->get_last_error( IMPORTING code = lv_err_code2 message = lv_err_msg2 ).
+      e_error = |HTTP receive failed (code={ lv_err_code2 } msg={ lv_err_msg2 })|.
       RETURN.
     ENDIF.
 
@@ -1170,6 +1182,9 @@ AT SELECTION-SCREEN OUTPUT.
       " Fetch failed / empty: clear the stale model so the listbox does not keep
       " showing the previous provider's value as a single leftover entry.
       CLEAR p_model.
+      IF lv_err IS NOT INITIAL.
+        MESSAGE lv_err TYPE 'W'.
+      ENDIF.
     ENDIF.
   ENDIF.
 
